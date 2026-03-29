@@ -1,0 +1,313 @@
+# ShrouDB Cipher Protocol Specification
+#
+# Machine-readable definition of the ShrouDB Cipher protocol.
+# Used by shroudb-codegen to generate typed client libraries in any language.
+
+[protocol]
+name = "shroudb-cipher"
+version = "1.0.0"
+description = "Encryption-as-a-service"
+default_tcp_port = 6599
+uri_schemes = ["shroudb-cipher://", "shroudb-cipher+tls://"]
+uri_format = "{scheme}[token@]host[:port][/keyring]"
+
+[protocol.wire_format]
+type = "resp3"
+request_format = "array_of_bulk_strings"
+success_envelope = "json_bulk_string"
+error_envelope = "simple_error"
+
+# ─── Error codes ──────────────────────────────────────────────────────────────
+
+[error_codes]
+
+[error_codes.DENIED]
+description = "Authentication required or insufficient permissions"
+http_equiv = 401
+
+[error_codes.NOTFOUND]
+description = "Keyring or key version not found"
+http_equiv = 404
+
+[error_codes.EXISTS]
+description = "Keyring already exists"
+http_equiv = 409
+
+[error_codes.BADARG]
+description = "Missing or invalid argument"
+http_equiv = 400
+
+[error_codes.WRONGTYPE]
+description = "Operation not supported for this keyring type"
+http_equiv = 422
+
+[error_codes.DISABLED]
+description = "Keyring is disabled"
+http_equiv = 503
+
+[error_codes.RETIRED]
+description = "Key version is retired — use REWRAP"
+http_equiv = 410
+
+[error_codes.POLICY]
+description = "Operation denied by keyring policy"
+http_equiv = 403
+
+[error_codes.INTERNAL]
+description = "Unexpected server error"
+http_equiv = 500
+
+# ─── Shared types ─────────────────────────────────────────────────────────────
+
+[types]
+
+[types.keyring]
+description = "Keyring name"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+[types.ciphertext]
+description = "Ciphertext with embedded key version (obfuscated prefix + base64url payload)"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+[types.plaintext]
+description = "Base64-encoded plaintext"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+[types.signature]
+description = "Hex-encoded cryptographic signature"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+[types.key_version]
+description = "Numeric key version"
+wire_type = "integer"
+rust_type = "u32"
+python_type = "int"
+typescript_type = "number"
+
+[types.algorithm]
+description = "Keyring algorithm (aes-256-gcm, chacha20-poly1305, hmac-sha256, ed25519, ecdsa-p256)"
+wire_type = "bulk_string"
+rust_type = "String"
+python_type = "str"
+typescript_type = "string"
+
+# ─── Commands ─────────────────────────────────────────────────────────────────
+
+[commands]
+
+[commands.keyring_create]
+verb = "KEYRING"
+variant = "CREATE"
+description = "Create a new keyring with its first active key"
+params = [
+    { name = "name", type = "keyring", required = true, position = 1, description = "Keyring name" },
+    { name = "algorithm", type = "algorithm", required = true, position = 2, description = "Encryption/signing algorithm" },
+    { name = "rotation_days", type = "integer", required = false, key = "ROTATION_DAYS", description = "Auto-rotation period in days (default: 90)" },
+    { name = "drain_days", type = "integer", required = false, key = "DRAIN_DAYS", description = "Drain period before retirement in days (default: 30)" },
+    { name = "convergent", type = "boolean", required = false, key = "CONVERGENT", description = "Enable convergent (deterministic) encryption" },
+]
+response = [
+    { name = "keyring", type = "keyring", description = "Keyring name" },
+    { name = "algorithm", type = "algorithm", description = "Algorithm" },
+    { name = "active_version", type = "key_version", description = "Active key version" },
+]
+errors = [
+    { code = "EXISTS", condition = "Keyring already exists" },
+    { code = "BADARG", condition = "Invalid algorithm" },
+]
+
+[commands.keyring_list]
+verb = "KEYRING"
+variant = "LIST"
+description = "List all keyring names"
+params = []
+response = [
+    { name = "keyrings", type = "array", description = "List of keyring names" },
+]
+
+[commands.encrypt]
+verb = "ENCRYPT"
+description = "Encrypt plaintext with the active key version"
+params = [
+    { name = "keyring", type = "keyring", required = true, position = 1, description = "Target keyring" },
+    { name = "plaintext", type = "plaintext", required = true, position = 2, description = "Base64-encoded data to encrypt" },
+    { name = "context", type = "string", required = false, key = "CONTEXT", description = "Additional authenticated data (AAD)" },
+    { name = "key_version", type = "key_version", required = false, key = "KEY_VERSION", description = "Specific key version to use (default: active)" },
+    { name = "convergent", type = "boolean", required = false, key = "CONVERGENT", description = "Opt-in to deterministic encryption (keyring must have convergent=true, CONTEXT required)" },
+]
+response = [
+    { name = "ciphertext", type = "ciphertext", description = "Encrypted data with embedded key version" },
+    { name = "key_version", type = "key_version", description = "Key version used for encryption" },
+]
+errors = [
+    { code = "NOTFOUND", condition = "Keyring does not exist" },
+    { code = "BADARG", condition = "Invalid plaintext encoding or missing keyring" },
+    { code = "WRONGTYPE", condition = "Keyring does not support encryption" },
+]
+
+[commands.decrypt]
+verb = "DECRYPT"
+description = "Decrypt ciphertext using the embedded key version"
+params = [
+    { name = "keyring", type = "keyring", required = true, position = 1, description = "Target keyring" },
+    { name = "ciphertext", type = "ciphertext", required = true, position = 2, description = "Ciphertext to decrypt" },
+    { name = "context", type = "string", required = false, key = "CONTEXT", description = "AAD used during encryption" },
+]
+response = [
+    { name = "plaintext", type = "plaintext", description = "Decrypted data" },
+]
+errors = [
+    { code = "NOTFOUND", condition = "Keyring or key version not found" },
+    { code = "BADARG", condition = "Invalid ciphertext format" },
+    { code = "RETIRED", condition = "Key version is retired" },
+]
+
+[commands.rewrap]
+verb = "REWRAP"
+description = "Re-encrypt ciphertext with the current active key version"
+params = [
+    { name = "keyring", type = "keyring", required = true, position = 1, description = "Target keyring" },
+    { name = "ciphertext", type = "ciphertext", required = true, position = 2, description = "Ciphertext to rewrap" },
+    { name = "context", type = "string", required = false, key = "CONTEXT", description = "AAD" },
+]
+response = [
+    { name = "ciphertext", type = "ciphertext", description = "Re-encrypted ciphertext with new key version" },
+    { name = "key_version", type = "key_version", description = "New key version used" },
+]
+errors = [
+    { code = "NOTFOUND", condition = "Keyring or key version not found" },
+    { code = "RETIRED", condition = "Old key version is retired" },
+]
+
+[commands.generate_data_key]
+verb = "GENERATE_DATA_KEY"
+description = "Generate a data encryption key (envelope encryption pattern)"
+params = [
+    { name = "keyring", type = "keyring", required = true, position = 1, description = "Target keyring" },
+    { name = "bits", type = "integer", required = false, key = "BITS", description = "Key size in bits: 128, 256, or 512 (default: 256)" },
+]
+response = [
+    { name = "plaintext_key", type = "plaintext", description = "Plaintext DEK (use for local encryption, then discard)" },
+    { name = "wrapped_key", type = "ciphertext", description = "Wrapped DEK (store alongside ciphertext, unwrap via DECRYPT)" },
+    { name = "key_version", type = "key_version", description = "Key version used to wrap" },
+]
+errors = [
+    { code = "NOTFOUND", condition = "Keyring does not exist" },
+    { code = "WRONGTYPE", condition = "Keyring does not support encryption" },
+]
+
+[commands.sign]
+verb = "SIGN"
+description = "Create a detached signature"
+params = [
+    { name = "keyring", type = "keyring", required = true, position = 1, description = "Target keyring" },
+    { name = "data", type = "plaintext", required = true, position = 2, description = "Base64-encoded data to sign" },
+]
+response = [
+    { name = "signature", type = "signature", description = "Hex-encoded detached signature" },
+    { name = "key_version", type = "key_version", description = "Key version used" },
+]
+errors = [
+    { code = "NOTFOUND", condition = "Keyring does not exist" },
+    { code = "WRONGTYPE", condition = "Keyring does not support signing" },
+]
+
+[commands.verify_signature]
+verb = "VERIFY_SIGNATURE"
+description = "Verify a detached signature"
+params = [
+    { name = "keyring", type = "keyring", required = true, position = 1, description = "Target keyring" },
+    { name = "data", type = "plaintext", required = true, position = 2, description = "Original data" },
+    { name = "signature", type = "signature", required = true, position = 3, description = "Hex-encoded signature to verify" },
+]
+response = [
+    { name = "valid", type = "boolean", description = "Whether the signature is valid" },
+]
+errors = [
+    { code = "NOTFOUND", condition = "Keyring does not exist" },
+    { code = "WRONGTYPE", condition = "Keyring does not support signing" },
+]
+
+[commands.rotate]
+verb = "ROTATE"
+description = "Rotate the keyring to a new key version"
+params = [
+    { name = "keyring", type = "keyring", required = true, position = 1, description = "Target keyring" },
+    { name = "force", type = "boolean", required = false, key = "FORCE", description = "Force rotation regardless of age" },
+    { name = "dryrun", type = "boolean", required = false, key = "DRYRUN", description = "Preview rotation without applying" },
+]
+response = [
+    { name = "rotated", type = "boolean", description = "Whether rotation occurred" },
+    { name = "key_version", type = "key_version", description = "Active key version after operation" },
+    { name = "previous_version", type = "key_version", description = "Previous active key version", optional = true },
+]
+errors = [
+    { code = "NOTFOUND", condition = "Keyring does not exist" },
+]
+
+[commands.key_info]
+verb = "KEY_INFO"
+description = "Get keyring metadata and key version information"
+params = [
+    { name = "keyring", type = "keyring", required = true, position = 1, description = "Target keyring" },
+]
+response = [
+    { name = "keyring", type = "keyring", description = "Keyring name" },
+    { name = "algorithm", type = "algorithm", description = "Keyring algorithm" },
+    { name = "active_version", type = "key_version", description = "Currently active key version" },
+    { name = "versions", type = "array", description = "List of all key versions with state" },
+]
+errors = [
+    { code = "NOTFOUND", condition = "Keyring does not exist" },
+]
+
+[commands.health]
+verb = "HEALTH"
+description = "Check server health"
+params = []
+response = [
+    { name = "status", type = "string", description = "ok" },
+]
+
+[commands.auth]
+verb = "AUTH"
+description = "Authenticate the connection"
+params = [
+    { name = "token", type = "string", required = true, position = 1, description = "Bearer token" },
+]
+response = [
+    { name = "status", type = "string", description = "OK on success" },
+]
+errors = [
+    { code = "DENIED", condition = "Invalid or expired token" },
+]
+
+[commands.ping]
+verb = "PING"
+description = "Simple connectivity check — returns PONG"
+params = []
+response = [
+    { name = "message", type = "string", description = "Always PONG" },
+]
+
+[commands.command_list]
+verb = "COMMAND"
+variant = "LIST"
+description = "List all supported commands"
+params = []
+response = [
+    { name = "count", type = "integer", description = "Number of supported commands" },
+    { name = "commands", type = "array", description = "List of command verb strings" },
+]

@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    uses: shroudb/.github/.github/workflows/rust-release.yml@main
+    permissions:
+      contents: write
+      packages: write
+    with:
+      product: "cipher"
+      server_package: "shroudb-cipher-server"
+      server_binary: "shroudb-cipher"
+      cli_package: "shroudb-cipher-cli"
+      cli_binary: "shroudb-cipher-cli"
+      docker_server_target: "shroudb-cipher"
+      docker_cli_target: "shroudb-cipher-cli"
+      crates: "shroudb-cipher-core,shroudb-cipher-engine,shroudb-cipher-protocol,shroudb-cipher-client,shroudb-cipher-server,shroudb-cipher-cli"
+    secrets:
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

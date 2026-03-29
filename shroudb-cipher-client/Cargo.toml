@@ -1,0 +1,17 @@
+[package]
+name = "shroudb-cipher-client"
+description = "Rust client SDK for the Cipher encryption-as-a-service engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

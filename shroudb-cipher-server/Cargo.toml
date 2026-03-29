@@ -1,0 +1,39 @@
+[package]
+name = "shroudb-cipher-server"
+description = "TCP server for the Cipher encryption-as-a-service engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "shroudb-cipher"
+path = "src/main.rs"
+
+[dependencies]
+shroudb-cipher-core.workspace = true
+shroudb-cipher-engine.workspace = true
+shroudb-cipher-protocol.workspace = true
+shroudb-acl.workspace = true
+shroudb-store.workspace = true
+shroudb-storage.workspace = true
+shroudb-crypto.workspace = true
+shroudb-protocol-wire.workspace = true
+ring.workspace = true
+
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+libc = "0.2"
+
+[dev-dependencies]
+shroudb-cipher-client.workspace = true
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+serde_json.workspace = true
