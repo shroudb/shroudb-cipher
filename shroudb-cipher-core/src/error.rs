@@ -52,4 +52,11 @@ pub enum CipherError {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    #[error("policy denied: {action} on {resource} (policy: {policy})")]
+    AbacDenied {
+        action: String,
+        resource: String,
+        policy: String,
+    },
 }

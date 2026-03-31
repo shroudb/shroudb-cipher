@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use shroudb_acl::{PolicyEffect, PolicyEvaluator, PolicyPrincipal, PolicyRequest, PolicyResource};
 use shroudb_cipher_core::ciphertext::CiphertextEnvelope;
 use shroudb_cipher_core::error::CipherError;
 use shroudb_cipher_core::key_version::KeyState;
@@ -85,14 +86,54 @@ pub struct KeyInfoResult {
 pub struct CipherEngine<S: Store> {
     pub(crate) keyrings: KeyringManager<S>,
     pub(crate) config: CipherConfig,
+    policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
 }
 
 impl<S: Store> CipherEngine<S> {
     /// Create a new Cipher engine.
-    pub async fn new(store: Arc<S>, config: CipherConfig) -> Result<Self, CipherError> {
+    pub async fn new(
+        store: Arc<S>,
+        config: CipherConfig,
+        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+    ) -> Result<Self, CipherError> {
         let keyrings = KeyringManager::new(store);
         keyrings.init().await?;
-        Ok(Self { keyrings, config })
+        Ok(Self {
+            keyrings,
+            config,
+            policy_evaluator,
+        })
+    }
+
+    async fn check_policy(&self, resource_id: &str, action: &str) -> Result<(), CipherError> {
+        let Some(evaluator) = &self.policy_evaluator else {
+            return Ok(());
+        };
+        let request = PolicyRequest {
+            principal: PolicyPrincipal {
+                id: String::new(),
+                roles: vec![],
+                claims: Default::default(),
+            },
+            resource: PolicyResource {
+                id: resource_id.to_string(),
+                resource_type: "keyring".to_string(),
+                attributes: Default::default(),
+            },
+            action: action.to_string(),
+        };
+        let decision = evaluator
+            .evaluate(&request)
+            .await
+            .map_err(|e| CipherError::Internal(format!("policy evaluation: {e}")))?;
+        if decision.effect == PolicyEffect::Deny {
+            return Err(CipherError::AbacDenied {
+                action: action.to_string(),
+                resource: resource_id.to_string(),
+                policy: decision.matched_policy.unwrap_or_default(),
+            });
+        }
+        Ok(())
     }
 
     // ── Keyring management ─────────────────────────────────────────
@@ -105,6 +146,7 @@ impl<S: Store> CipherEngine<S> {
         drain_days: Option<u32>,
         convergent: bool,
     ) -> Result<KeyInfoResult, CipherError> {
+        self.check_policy(name, "keyring_create").await?;
         let kr = self
             .keyrings
             .create(
@@ -469,6 +511,7 @@ impl<S: Store> CipherEngine<S> {
         force: bool,
         dryrun: bool,
     ) -> Result<RotateResult, CipherError> {
+        self.check_policy(keyring_name, "rotate").await?;
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Rotate)?;
@@ -646,7 +689,7 @@ mod tests {
 
     async fn setup() -> CipherEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
-        CipherEngine::new(store, CipherConfig::default())
+        CipherEngine::new(store, CipherConfig::default(), None)
             .await
             .unwrap()
     }

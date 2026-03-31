@@ -210,7 +210,7 @@ mod tests {
 
     async fn setup() -> CipherEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
-        CipherEngine::new(store, CipherConfig::default())
+        CipherEngine::new(store, CipherConfig::default(), None)
             .await
             .unwrap()
     }
