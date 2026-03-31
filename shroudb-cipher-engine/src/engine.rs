@@ -4,6 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use shroudb_acl::{PolicyEffect, PolicyEvaluator, PolicyPrincipal, PolicyRequest, PolicyResource};
+use shroudb_chronicle_core::event::{Engine as ChronicleEngine, Event, EventResult};
+use shroudb_chronicle_core::ops::ChronicleOps;
 use shroudb_cipher_core::ciphertext::CiphertextEnvelope;
 use shroudb_cipher_core::error::CipherError;
 use shroudb_cipher_core::key_version::KeyState;
@@ -87,6 +89,7 @@ pub struct CipherEngine<S: Store> {
     pub(crate) keyrings: KeyringManager<S>,
     pub(crate) config: CipherConfig,
     policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+    chronicle: Option<Arc<dyn ChronicleOps>>,
 }
 
 impl<S: Store> CipherEngine<S> {
@@ -95,6 +98,7 @@ impl<S: Store> CipherEngine<S> {
         store: Arc<S>,
         config: CipherConfig,
         policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+        chronicle: Option<Arc<dyn ChronicleOps>>,
     ) -> Result<Self, CipherError> {
         let keyrings = KeyringManager::new(store);
         keyrings.init().await?;
@@ -102,6 +106,7 @@ impl<S: Store> CipherEngine<S> {
             keyrings,
             config,
             policy_evaluator,
+            chronicle,
         })
     }
 
@@ -141,6 +146,30 @@ impl<S: Store> CipherEngine<S> {
         Ok(())
     }
 
+    /// Emit an audit event to Chronicle. If chronicle is not configured, this
+    /// is a no-op. If recording fails, we log at warn level but never fail the
+    /// calling operation — Cipher is infrastructure that other engines depend on.
+    async fn emit_audit_event(&self, operation: &str, resource: &str, actor: &str) {
+        let Some(chronicle) = &self.chronicle else {
+            return;
+        };
+        let event = Event::new(
+            ChronicleEngine::Cipher,
+            operation.to_string(),
+            resource.to_string(),
+            EventResult::Ok,
+            actor.to_string(),
+        );
+        if let Err(e) = chronicle.record(event).await {
+            tracing::warn!(
+                operation,
+                resource,
+                error = %e,
+                "failed to record audit event to chronicle"
+            );
+        }
+    }
+
     // ── Keyring management ─────────────────────────────────────────
 
     pub async fn keyring_create(
@@ -166,6 +195,8 @@ impl<S: Store> CipherEngine<S> {
                 },
             )
             .await?;
+        self.emit_audit_event("keyring_create", name, actor.unwrap_or(""))
+            .await;
         Ok(build_key_info(&kr))
     }
 
@@ -175,7 +206,7 @@ impl<S: Store> CipherEngine<S> {
 
     // ── Encrypt ────────────────────────────────────────────────────
 
-    pub fn encrypt(
+    pub async fn encrypt(
         &self,
         keyring_name: &str,
         plaintext_b64: &str,
@@ -245,15 +276,17 @@ impl<S: Store> CipherEngine<S> {
             payload,
         };
 
-        Ok(EncryptResult {
+        let result = EncryptResult {
             ciphertext: envelope.encode()?,
             key_version: kv.version,
-        })
+        };
+        self.emit_audit_event("encrypt", keyring_name, "").await;
+        Ok(result)
     }
 
     // ── Decrypt ────────────────────────────────────────────────────
 
-    pub fn decrypt(
+    pub async fn decrypt(
         &self,
         keyring_name: &str,
         ciphertext: &str,
@@ -285,6 +318,7 @@ impl<S: Store> CipherEngine<S> {
             aad,
         )?;
 
+        self.emit_audit_event("decrypt", keyring_name, "").await;
         Ok(DecryptResult {
             plaintext: plaintext.into(),
         })
@@ -410,7 +444,11 @@ impl<S: Store> CipherEngine<S> {
 
     // ── Sign ───────────────────────────────────────────────────────
 
-    pub fn sign(&self, keyring_name: &str, data_b64: &str) -> Result<SignResult, CipherError> {
+    pub async fn sign(
+        &self,
+        keyring_name: &str,
+        data_b64: &str,
+    ) -> Result<SignResult, CipherError> {
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Sign)?;
@@ -432,10 +470,12 @@ impl<S: Store> CipherEngine<S> {
         let signature =
             crypto_ops::sign_with_key(keyring.algorithm, key_material.as_bytes(), &data)?;
 
-        Ok(SignResult {
+        let result = SignResult {
             signature: signature.into(),
             key_version: active_kv.version,
-        })
+        };
+        self.emit_audit_event("sign", keyring_name, "").await;
+        Ok(result)
     }
 
     // ── Verify signature ───────────────────────────────────────────
@@ -597,6 +637,9 @@ impl<S: Store> CipherEngine<S> {
             "keyring rotated"
         );
 
+        self.emit_audit_event("rotate", keyring_name, actor.unwrap_or(""))
+            .await;
+
         Ok(RotateResult {
             key_version: new_active.version,
             previous_version: Some(prev_version),
@@ -696,7 +739,7 @@ mod tests {
 
     async fn setup() -> CipherEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
-        CipherEngine::new(store, CipherConfig::default(), None)
+        CipherEngine::new(store, CipherConfig::default(), None, None)
             .await
             .unwrap()
     }
@@ -712,8 +755,9 @@ mod tests {
         let plaintext = STANDARD.encode(b"hello world");
         let enc = engine
             .encrypt("test", &plaintext, None, None, false)
+            .await
             .unwrap();
-        let dec = engine.decrypt("test", &enc.ciphertext, None).unwrap();
+        let dec = engine.decrypt("test", &enc.ciphertext, None).await.unwrap();
         assert_eq!(dec.plaintext.as_bytes(), b"hello world");
     }
 
@@ -728,11 +772,13 @@ mod tests {
         let plaintext = STANDARD.encode(b"secret");
         let enc = engine
             .encrypt("test", &plaintext, Some("user-123"), None, false)
+            .await
             .unwrap();
 
         // Correct context
         let dec = engine
             .decrypt("test", &enc.ciphertext, Some("user-123"))
+            .await
             .unwrap();
         assert_eq!(dec.plaintext.as_bytes(), b"secret");
 
@@ -740,6 +786,7 @@ mod tests {
         assert!(
             engine
                 .decrypt("test", &enc.ciphertext, Some("user-456"))
+                .await
                 .is_err()
         );
     }
@@ -755,9 +802,11 @@ mod tests {
         let plaintext = STANDARD.encode(b"deterministic");
         let enc1 = engine
             .encrypt("test", &plaintext, Some("ctx"), None, true)
+            .await
             .unwrap();
         let enc2 = engine
             .encrypt("test", &plaintext, Some("ctx"), None, true)
+            .await
             .unwrap();
 
         assert_eq!(enc1.ciphertext, enc2.ciphertext);
@@ -774,6 +823,7 @@ mod tests {
         let plaintext = STANDARD.encode(b"data");
         let err = engine
             .encrypt("test", &plaintext, None, None, true)
+            .await
             .unwrap_err();
         assert!(matches!(err, CipherError::ConvergentGuard));
     }
@@ -789,6 +839,7 @@ mod tests {
         let plaintext = STANDARD.encode(b"data");
         let err = engine
             .encrypt("test", &plaintext, Some("ctx"), None, true)
+            .await
             .unwrap_err();
         assert!(matches!(err, CipherError::ConvergentGuard));
     }
@@ -804,6 +855,7 @@ mod tests {
         let plaintext = STANDARD.encode(b"rewrap me");
         let enc = engine
             .encrypt("test", &plaintext, None, None, false)
+            .await
             .unwrap();
         assert_eq!(enc.key_version, 1);
 
@@ -815,7 +867,10 @@ mod tests {
         assert_eq!(rewrapped.key_version, 2);
 
         // Decrypt the rewrapped ciphertext
-        let dec = engine.decrypt("test", &rewrapped.ciphertext, None).unwrap();
+        let dec = engine
+            .decrypt("test", &rewrapped.ciphertext, None)
+            .await
+            .unwrap();
         assert_eq!(dec.plaintext.as_bytes(), b"rewrap me");
     }
 
@@ -832,7 +887,10 @@ mod tests {
         assert!(!result.wrapped_key.is_empty());
 
         // Unwrap the key via decrypt
-        let dec = engine.decrypt("test", &result.wrapped_key, None).unwrap();
+        let dec = engine
+            .decrypt("test", &result.wrapped_key, None)
+            .await
+            .unwrap();
         assert_eq!(dec.plaintext.as_bytes(), result.plaintext_key.as_bytes());
     }
 
@@ -852,7 +910,7 @@ mod tests {
             .unwrap();
 
         let data = STANDARD.encode(b"sign this");
-        let sig = engine.sign("signing", &data).unwrap();
+        let sig = engine.sign("signing", &data).await.unwrap();
         let valid = engine
             .verify_signature("signing", &data, &hex::encode(sig.signature.as_bytes()))
             .unwrap();
@@ -925,6 +983,7 @@ mod tests {
         let plaintext = STANDARD.encode(b"data");
         let err = engine
             .encrypt("test", &plaintext, None, None, false)
+            .await
             .unwrap_err();
         assert!(matches!(err, CipherError::Disabled(_)));
     }
@@ -945,8 +1004,11 @@ mod tests {
             .unwrap();
 
         let plaintext = STANDARD.encode(b"chacha data");
-        let enc = engine.encrypt("cc", &plaintext, None, None, false).unwrap();
-        let dec = engine.decrypt("cc", &enc.ciphertext, None).unwrap();
+        let enc = engine
+            .encrypt("cc", &plaintext, None, None, false)
+            .await
+            .unwrap();
+        let dec = engine.decrypt("cc", &enc.ciphertext, None).await.unwrap();
         assert_eq!(dec.plaintext.as_bytes(), b"chacha data");
     }
 
@@ -966,7 +1028,7 @@ mod tests {
             .unwrap();
 
         let data = STANDARD.encode(b"hmac data");
-        let sig = engine.sign("hmac", &data).unwrap();
+        let sig = engine.sign("hmac", &data).await.unwrap();
         let valid = engine
             .verify_signature("hmac", &data, &hex::encode(sig.signature.as_bytes()))
             .unwrap();
@@ -984,6 +1046,7 @@ mod tests {
         let plaintext = STANDARD.encode(b"data");
         let enc = engine
             .encrypt("test", &plaintext, None, None, false)
+            .await
             .unwrap();
         let original_version = enc.key_version;
 
@@ -1006,7 +1069,10 @@ mod tests {
             .unwrap();
 
         // Attempt to decrypt with retired key version
-        let err = engine.decrypt("test", &enc.ciphertext, None).unwrap_err();
+        let err = engine
+            .decrypt("test", &enc.ciphertext, None)
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, CipherError::KeyVersionRetired { .. }),
             "expected KeyVersionRetired, got: {err:?}"
@@ -1045,8 +1111,9 @@ mod tests {
         let plaintext = STANDARD.encode(b"old data");
         let enc = engine
             .encrypt("test", &plaintext, None, Some(1), false)
+            .await
             .unwrap();
-        let dec = engine.decrypt("test", &enc.ciphertext, None).unwrap();
+        let dec = engine.decrypt("test", &enc.ciphertext, None).await.unwrap();
         assert_eq!(dec.plaintext.as_bytes(), b"old data");
     }
 
@@ -1067,7 +1134,10 @@ mod tests {
                 let mut results = Vec::new();
                 for i in 0..5u32 {
                     let plaintext = STANDARD.encode(format!("task-{task_id}-item-{i}").as_bytes());
-                    let enc = eng.encrypt("test", &plaintext, None, None, false).unwrap();
+                    let enc = eng
+                        .encrypt("test", &plaintext, None, None, false)
+                        .await
+                        .unwrap();
                     results.push((format!("task-{task_id}-item-{i}"), enc));
                 }
                 results
@@ -1088,7 +1158,7 @@ mod tests {
 
         // Every ciphertext must be decryptable
         for (original, enc) in &all_results {
-            let dec = engine.decrypt("test", &enc.ciphertext, None).unwrap();
+            let dec = engine.decrypt("test", &enc.ciphertext, None).await.unwrap();
             assert_eq!(
                 dec.plaintext.as_bytes(),
                 original.as_bytes(),
@@ -1114,8 +1184,12 @@ mod tests {
         let plaintext = STANDARD.encode(b"secret data");
         let result = engine
             .encrypt("test", &plaintext, None, None, false)
+            .await
             .unwrap();
-        let dec = engine.decrypt("test", &result.ciphertext, None).unwrap();
+        let dec = engine
+            .decrypt("test", &result.ciphertext, None)
+            .await
+            .unwrap();
 
         // Debug output must not contain the plaintext
         let debug = format!("{dec:?}");

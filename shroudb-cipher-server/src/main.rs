@@ -108,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
         scheduler_interval_secs: cfg.engine.scheduler_interval_secs,
     };
     let engine = Arc::new(
-        CipherEngine::new(store, cipher_config, None)
+        CipherEngine::new(store, cipher_config, None, None)
             .await
             .context("failed to initialize cipher engine")?,
     );

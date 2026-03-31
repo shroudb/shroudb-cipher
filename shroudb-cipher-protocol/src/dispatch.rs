@@ -86,13 +86,16 @@ pub async fn dispatch<S: Store>(
             context,
             key_version,
             convergent,
-        } => match engine.encrypt(
-            &keyring,
-            &plaintext,
-            context.as_deref(),
-            key_version,
-            convergent,
-        ) {
+        } => match engine
+            .encrypt(
+                &keyring,
+                &plaintext,
+                context.as_deref(),
+                key_version,
+                convergent,
+            )
+            .await
+        {
             Ok(result) => CipherResponse::ok(serde_json::json!({
                 "status": "ok",
                 "ciphertext": result.ciphertext,
@@ -106,7 +109,10 @@ pub async fn dispatch<S: Store>(
             keyring,
             ciphertext,
             context,
-        } => match engine.decrypt(&keyring, &ciphertext, context.as_deref()) {
+        } => match engine
+            .decrypt(&keyring, &ciphertext, context.as_deref())
+            .await
+        {
             Ok(result) => CipherResponse::ok(serde_json::json!({
                 "status": "ok",
                 "plaintext": STANDARD.encode(result.plaintext.as_bytes()),
@@ -142,7 +148,7 @@ pub async fn dispatch<S: Store>(
         }
 
         // ── Sign ───────────────────────────────────��───────────────
-        CipherCommand::Sign { keyring, data } => match engine.sign(&keyring, &data) {
+        CipherCommand::Sign { keyring, data } => match engine.sign(&keyring, &data).await {
             Ok(result) => CipherResponse::ok(serde_json::json!({
                 "status": "ok",
                 "signature": hex::encode(result.signature.as_bytes()),
@@ -212,7 +218,7 @@ mod tests {
 
     async fn setup() -> CipherEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
-        CipherEngine::new(store, CipherConfig::default(), None)
+        CipherEngine::new(store, CipherConfig::default(), None, None)
             .await
             .unwrap()
     }
