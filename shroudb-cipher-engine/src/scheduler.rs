@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use shroudb_cipher_core::key_version::KeyState;
 use shroudb_store::Store;
+use tokio::sync::watch;
 
 use crate::engine::CipherEngine;
 use crate::keyring_manager::find_active_key;
@@ -13,15 +14,20 @@ use crate::keyring_manager::find_active_key;
 pub fn start_scheduler<S: Store + 'static>(
     engine: Arc<CipherEngine<S>>,
     interval_secs: u64,
+    mut shutdown: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
-        interval.tick().await; // skip the first immediate tick
-
         loop {
-            interval.tick().await;
-            if let Err(e) = run_cycle(&engine).await {
-                tracing::warn!(error = %e, "scheduler cycle failed");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
+                    if let Err(e) = run_cycle(&engine).await {
+                        tracing::warn!(error = %e, "scheduler cycle failed");
+                    }
+                }
+                _ = shutdown.changed() => {
+                    tracing::info!("cipher scheduler shutting down");
+                    break;
+                }
             }
         }
     })
@@ -52,7 +58,7 @@ async fn run_cycle<S: Store>(engine: &CipherEngine<S>) -> Result<(), String> {
                 .unwrap_or(0);
 
             if age_days >= keyring.rotation_days as u64 {
-                match engine.rotate(&name, true, false).await {
+                match engine.rotate(&name, true, false, None).await {
                     Ok(result) => {
                         tracing::info!(
                             keyring = name,

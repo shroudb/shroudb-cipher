@@ -43,6 +43,8 @@ pub async fn dispatch<S: Store>(
         return CipherResponse::error(format!("access denied: {e}"));
     }
 
+    let actor = auth_context.map(|c| c.actor.as_str());
+
     match cmd {
         CipherCommand::Auth { .. } => CipherResponse::error("AUTH handled at connection layer"),
 
@@ -59,7 +61,7 @@ pub async fn dispatch<S: Store>(
                 Err(e) => return CipherResponse::error(e),
             };
             match engine
-                .keyring_create(&name, algo, rotation_days, drain_days, convergent)
+                .keyring_create(&name, algo, rotation_days, drain_days, convergent, actor)
                 .await
             {
                 Ok(info) => CipherResponse::ok(serde_json::json!({
@@ -167,7 +169,7 @@ pub async fn dispatch<S: Store>(
             keyring,
             force,
             dryrun,
-        } => match engine.rotate(&keyring, force, dryrun).await {
+        } => match engine.rotate(&keyring, force, dryrun, actor).await {
             Ok(result) => CipherResponse::ok(serde_json::json!({
                 "status": "ok",
                 "rotated": result.rotated,

@@ -105,13 +105,18 @@ impl<S: Store> CipherEngine<S> {
         })
     }
 
-    async fn check_policy(&self, resource_id: &str, action: &str) -> Result<(), CipherError> {
+    async fn check_policy(
+        &self,
+        resource_id: &str,
+        action: &str,
+        actor: Option<&str>,
+    ) -> Result<(), CipherError> {
         let Some(evaluator) = &self.policy_evaluator else {
             return Ok(());
         };
         let request = PolicyRequest {
             principal: PolicyPrincipal {
-                id: String::new(),
+                id: actor.unwrap_or("").to_string(),
                 roles: vec![],
                 claims: Default::default(),
             },
@@ -145,8 +150,9 @@ impl<S: Store> CipherEngine<S> {
         rotation_days: Option<u32>,
         drain_days: Option<u32>,
         convergent: bool,
+        actor: Option<&str>,
     ) -> Result<KeyInfoResult, CipherError> {
-        self.check_policy(name, "keyring_create").await?;
+        self.check_policy(name, "keyring_create", actor).await?;
         let kr = self
             .keyrings
             .create(
@@ -510,8 +516,9 @@ impl<S: Store> CipherEngine<S> {
         keyring_name: &str,
         force: bool,
         dryrun: bool,
+        actor: Option<&str>,
     ) -> Result<RotateResult, CipherError> {
-        self.check_policy(keyring_name, "rotate").await?;
+        self.check_policy(keyring_name, "rotate", actor).await?;
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Rotate)?;
@@ -698,7 +705,7 @@ mod tests {
     async fn encrypt_decrypt_roundtrip() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
@@ -714,7 +721,7 @@ mod tests {
     async fn encrypt_decrypt_with_context() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
@@ -741,7 +748,7 @@ mod tests {
     async fn convergent_encryption() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, true)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, true, None)
             .await
             .unwrap();
 
@@ -760,7 +767,7 @@ mod tests {
     async fn convergent_guard_no_context() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, true)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, true, None)
             .await
             .unwrap();
 
@@ -775,7 +782,7 @@ mod tests {
     async fn convergent_guard_keyring_not_convergent() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
@@ -790,7 +797,7 @@ mod tests {
     async fn rewrap_changes_version() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
@@ -801,7 +808,7 @@ mod tests {
         assert_eq!(enc.key_version, 1);
 
         // Rotate
-        engine.rotate("test", true, false).await.unwrap();
+        engine.rotate("test", true, false, None).await.unwrap();
 
         // Rewrap
         let rewrapped = engine.rewrap("test", &enc.ciphertext, None).unwrap();
@@ -816,7 +823,7 @@ mod tests {
     async fn generate_data_key_works() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
@@ -833,7 +840,14 @@ mod tests {
     async fn sign_verify_roundtrip() {
         let engine = setup().await;
         engine
-            .keyring_create("signing", KeyringAlgorithm::Ed25519, None, None, false)
+            .keyring_create(
+                "signing",
+                KeyringAlgorithm::Ed25519,
+                None,
+                None,
+                false,
+                None,
+            )
             .await
             .unwrap();
 
@@ -849,11 +863,11 @@ mod tests {
     async fn rotate_creates_new_version() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
-        let result = engine.rotate("test", true, false).await.unwrap();
+        let result = engine.rotate("test", true, false, None).await.unwrap();
         assert!(result.rotated);
         assert_eq!(result.key_version, 2);
         assert_eq!(result.previous_version, Some(1));
@@ -866,11 +880,11 @@ mod tests {
     async fn rotate_not_due() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
-        let result = engine.rotate("test", false, false).await.unwrap();
+        let result = engine.rotate("test", false, false, None).await.unwrap();
         assert!(!result.rotated);
     }
 
@@ -878,10 +892,10 @@ mod tests {
     async fn key_info_returns_versions() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
-        engine.rotate("test", true, false).await.unwrap();
+        engine.rotate("test", true, false, None).await.unwrap();
 
         let info = engine.key_info("test").unwrap();
         assert_eq!(info.name, "test");
@@ -894,7 +908,7 @@ mod tests {
     async fn disabled_keyring_rejects_operations() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
@@ -919,7 +933,14 @@ mod tests {
     async fn chacha20_encrypt_decrypt() {
         let engine = setup().await;
         engine
-            .keyring_create("cc", KeyringAlgorithm::ChaCha20Poly1305, None, None, false)
+            .keyring_create(
+                "cc",
+                KeyringAlgorithm::ChaCha20Poly1305,
+                None,
+                None,
+                false,
+                None,
+            )
             .await
             .unwrap();
 
@@ -933,7 +954,14 @@ mod tests {
     async fn hmac_sign_verify() {
         let engine = setup().await;
         engine
-            .keyring_create("hmac", KeyringAlgorithm::HmacSha256, None, None, false)
+            .keyring_create(
+                "hmac",
+                KeyringAlgorithm::HmacSha256,
+                None,
+                None,
+                false,
+                None,
+            )
             .await
             .unwrap();
 
@@ -949,7 +977,7 @@ mod tests {
     async fn decrypt_with_retired_key_rejected() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
@@ -960,8 +988,8 @@ mod tests {
         let original_version = enc.key_version;
 
         // Rotate twice to push v1 from Active → Draining → Retired
-        engine.rotate("test", true, false).await.unwrap();
-        engine.rotate("test", true, false).await.unwrap();
+        engine.rotate("test", true, false, None).await.unwrap();
+        engine.rotate("test", true, false, None).await.unwrap();
 
         // Manually retire v1 by running the scheduler cycle
         engine
@@ -989,17 +1017,17 @@ mod tests {
     async fn double_rotation_creates_two_draining() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
         // First rotation: v1 Active → Draining, v2 Active
-        let r1 = engine.rotate("test", true, false).await.unwrap();
+        let r1 = engine.rotate("test", true, false, None).await.unwrap();
         assert!(r1.rotated);
         assert_eq!(r1.key_version, 2);
 
         // Second rotation: v2 Active → Draining, v3 Active
-        let r2 = engine.rotate("test", true, false).await.unwrap();
+        let r2 = engine.rotate("test", true, false, None).await.unwrap();
         assert!(r2.rotated);
         assert_eq!(r2.key_version, 3);
 
@@ -1026,7 +1054,7 @@ mod tests {
     async fn sensitive_bytes_debug_is_redacted() {
         let engine = setup().await;
         engine
-            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
             .await
             .unwrap();
 
