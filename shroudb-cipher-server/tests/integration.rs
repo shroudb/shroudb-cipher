@@ -460,6 +460,66 @@ async fn tcp_verify_signature_after_rotation() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// TCP: Edge cases
+// ═══════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_empty_plaintext_encrypt() {
+    let server = TestServer::start().await.expect("server failed to start");
+    let mut client = shroudb_cipher_client::CipherClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect failed");
+
+    client
+        .keyring_create("empty-test", "aes-256-gcm", None, None, false)
+        .await
+        .unwrap();
+
+    // Empty string base64-encoded is "" (zero bytes → zero base64 chars)
+    let enc = client
+        .encrypt("empty-test", "", None, None, false)
+        .await
+        .expect("encrypting empty plaintext should succeed");
+    assert!(!enc.ciphertext.is_empty());
+
+    let dec = client
+        .decrypt("empty-test", &enc.ciphertext, None)
+        .await
+        .expect("decrypting empty plaintext should succeed");
+    assert_eq!(dec.plaintext, "");
+}
+
+#[tokio::test]
+async fn test_max_length_plaintext() {
+    let server = TestServer::start().await.expect("server failed to start");
+    let mut client = shroudb_cipher_client::CipherClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect failed");
+
+    client
+        .keyring_create("big-test", "aes-256-gcm", None, None, false)
+        .await
+        .unwrap();
+
+    // 1MB plaintext: "QUFB..." (base64 of 0x41 repeated)
+    // "A" in base64 is "QQ==" but we want a clean multiple — use "AAAA" = 3 bytes
+    // Repeat "QUFB" (base64 of "AAA") to get ~1MB of base64 data
+    let large_b64 = "QUFB".repeat(1024 * 1024 / 4);
+
+    let enc = client
+        .encrypt("big-test", &large_b64, None, None, false)
+        .await
+        .expect("encrypting 1MB plaintext failed");
+    assert!(!enc.ciphertext.is_empty());
+
+    let dec = client
+        .decrypt("big-test", &enc.ciphertext, None)
+        .await
+        .expect("decrypting 1MB plaintext failed");
+    assert_eq!(dec.plaintext, large_b64);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ACL: Token-based auth
 // ═══════════════════════════════════════════════════════════════════════
 
