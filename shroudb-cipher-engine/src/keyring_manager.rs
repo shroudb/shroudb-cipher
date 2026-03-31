@@ -37,9 +37,12 @@ impl Default for KeyringCreateOpts {
 }
 
 /// Manages keyrings with a Store-backed persistence layer and in-memory cache.
+///
+/// Keyrings are stored behind Arc to avoid cloning key material on every
+/// cache lookup. Mutations clone-on-write via `Arc::unwrap_or_clone`.
 pub struct KeyringManager<S: Store> {
     store: Arc<S>,
-    cache: DashMap<String, Keyring>,
+    cache: DashMap<String, Arc<Keyring>>,
 }
 
 impl<S: Store> KeyringManager<S> {
@@ -83,7 +86,7 @@ impl<S: Store> KeyringManager<S> {
                     .map_err(|e| CipherError::Store(e.to_string()))?;
                 let keyring: Keyring = serde_json::from_slice(&entry.value)
                     .map_err(|e| CipherError::Internal(format!("corrupt keyring data: {e}")))?;
-                self.cache.insert(keyring.name.clone(), keyring);
+                self.cache.insert(keyring.name.clone(), Arc::new(keyring));
             }
 
             if page.cursor.is_none() {
@@ -106,7 +109,7 @@ impl<S: Store> KeyringManager<S> {
         name: &str,
         algorithm: KeyringAlgorithm,
         opts: KeyringCreateOpts,
-    ) -> Result<Keyring, CipherError> {
+    ) -> Result<Arc<Keyring>, CipherError> {
         validate_keyring_name(name)?;
 
         if self.cache.contains_key(name) {
@@ -141,6 +144,7 @@ impl<S: Store> KeyringManager<S> {
         };
 
         self.save(&keyring).await?;
+        let keyring = Arc::new(keyring);
         self.cache.insert(name.to_string(), keyring.clone());
 
         tracing::info!(
@@ -152,8 +156,8 @@ impl<S: Store> KeyringManager<S> {
         Ok(keyring)
     }
 
-    /// Get a keyring by name from cache.
-    pub fn get(&self, name: &str) -> Result<Keyring, CipherError> {
+    /// Get a keyring by name from cache. Returns Arc to avoid cloning key material.
+    pub fn get(&self, name: &str) -> Result<Arc<Keyring>, CipherError> {
         self.cache
             .get(name)
             .map(|r| r.value().clone())
@@ -166,14 +170,17 @@ impl<S: Store> KeyringManager<S> {
     }
 
     /// Update a keyring: applies a mutation function, saves to Store, updates cache.
+    /// Clone-on-write: the Arc is unwrapped for mutation, then re-wrapped.
     pub async fn update(
         &self,
         name: &str,
         f: impl FnOnce(&mut Keyring) -> Result<(), CipherError>,
-    ) -> Result<Keyring, CipherError> {
-        let mut keyring = self.get(name)?;
+    ) -> Result<Arc<Keyring>, CipherError> {
+        let arc = self.get(name)?;
+        let mut keyring = Arc::unwrap_or_clone(arc);
         f(&mut keyring)?;
         self.save(&keyring).await?;
+        let keyring = Arc::new(keyring);
         self.cache.insert(name.to_string(), keyring.clone());
         Ok(keyring)
     }
