@@ -343,4 +343,76 @@ mod tests {
         let resp = dispatch(&engine, cmd, None).await;
         assert!(!resp.is_ok());
     }
+
+    // ── ACL tests ─────────────────────────────────────────────────────
+
+    fn read_only_context() -> AuthContext {
+        use shroudb_acl::{Grant, Scope};
+        AuthContext::tenant(
+            "tenant-a",
+            "read-user",
+            vec![Grant {
+                namespace: "cipher.payments.*".into(),
+                scopes: vec![Scope::Read],
+            }],
+            None,
+        )
+    }
+
+    fn write_context() -> AuthContext {
+        use shroudb_acl::{Grant, Scope};
+        AuthContext::tenant(
+            "tenant-a",
+            "write-user",
+            vec![Grant {
+                namespace: "cipher.payments.*".into(),
+                scopes: vec![Scope::Read, Scope::Write],
+            }],
+            None,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_unauthorized_write_rejected() {
+        let engine = setup().await;
+        let ctx = read_only_context();
+
+        // ENCRYPT requires Write scope on cipher.<keyring>.*
+        let cmd = parse_command(&["ENCRYPT", "payments", "SGVsbG8="]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(
+            !resp.is_ok(),
+            "read-only context should not be able to encrypt"
+        );
+
+        match resp {
+            CipherResponse::Error(msg) => assert!(
+                msg.contains("access denied"),
+                "error should mention access denied, got: {msg}"
+            ),
+            _ => panic!("expected error response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_unauthorized_admin_rejected() {
+        let engine = setup().await;
+        let ctx = write_context();
+
+        // KEYRING CREATE requires Admin scope
+        let cmd = parse_command(&["KEYRING", "CREATE", "payments", "aes-256-gcm"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(
+            !resp.is_ok(),
+            "non-admin context should not be able to create keyrings"
+        );
+
+        match resp {
+            CipherResponse::Error(msg) => assert!(
+                msg.contains("access denied"),
+                "error should mention access denied, got: {msg}"
+            ),
+            _ => panic!("expected error response"),
+        }
+    }
 }
