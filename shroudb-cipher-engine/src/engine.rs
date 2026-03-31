@@ -8,7 +8,7 @@ use shroudb_cipher_core::error::CipherError;
 use shroudb_cipher_core::key_version::KeyState;
 use shroudb_cipher_core::keyring::KeyringAlgorithm;
 use shroudb_cipher_core::policy::KeyringOperation;
-use shroudb_crypto::SecretBytes;
+use shroudb_crypto::{SecretBytes, SensitiveBytes};
 use shroudb_store::Store;
 
 use crate::crypto_ops::{self, NonceMode};
@@ -43,13 +43,13 @@ pub struct EncryptResult {
 /// Decrypt operation result.
 #[derive(Debug)]
 pub struct DecryptResult {
-    pub plaintext: Vec<u8>,
+    pub plaintext: SensitiveBytes,
 }
 
 /// Data encryption key result (envelope encryption).
 #[derive(Debug)]
 pub struct DataKeyResult {
-    pub plaintext_key: Vec<u8>,
+    pub plaintext_key: SensitiveBytes,
     pub wrapped_key: String,
     pub key_version: u32,
 }
@@ -57,7 +57,7 @@ pub struct DataKeyResult {
 /// Sign operation result.
 #[derive(Debug)]
 pub struct SignResult {
-    pub signature: Vec<u8>,
+    pub signature: SensitiveBytes,
     pub key_version: u32,
 }
 
@@ -237,7 +237,9 @@ impl<S: Store> CipherEngine<S> {
             aad,
         )?;
 
-        Ok(DecryptResult { plaintext })
+        Ok(DecryptResult {
+            plaintext: plaintext.into(),
+        })
     }
 
     // ── Rewrap ─────────────────────────────────────────────────────
@@ -352,7 +354,7 @@ impl<S: Store> CipherEngine<S> {
         };
 
         Ok(DataKeyResult {
-            plaintext_key: dek,
+            plaintext_key: dek.into(),
             wrapped_key: wrapped_envelope.encode()?,
             key_version: active_kv.version,
         })
@@ -383,7 +385,7 @@ impl<S: Store> CipherEngine<S> {
             crypto_ops::sign_with_key(keyring.algorithm, key_material.as_bytes(), &data)?;
 
         Ok(SignResult {
-            signature,
+            signature: signature.into(),
             key_version: active_kv.version,
         })
     }
@@ -632,7 +634,7 @@ fn build_key_info(keyring: &shroudb_cipher_core::keyring::Keyring) -> KeyInfoRes
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock is before Unix epoch")
+        .unwrap_or_default()
         .as_secs()
 }
 
@@ -642,42 +644,8 @@ use shroudb_cipher_core::key_version::KeyVersion;
 mod tests {
     use super::*;
 
-    async fn create_test_store() -> Arc<shroudb_storage::EmbeddedStore> {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let config = shroudb_storage::StorageEngineConfig {
-            data_dir: dir,
-            ..Default::default()
-        };
-        let engine = shroudb_storage::StorageEngine::open(config, &EphemeralKey)
-            .await
-            .unwrap();
-        Arc::new(shroudb_storage::EmbeddedStore::new(
-            Arc::new(engine),
-            "cipher-test",
-        ))
-    }
-
-    struct EphemeralKey;
-    impl shroudb_storage::MasterKeySource for EphemeralKey {
-        fn source_name(&self) -> &str {
-            "ephemeral-test"
-        }
-        fn load<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                    > + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async { Ok(shroudb_crypto::SecretBytes::new(vec![0x42u8; 32])) })
-        }
-    }
-
     async fn setup() -> CipherEngine<shroudb_storage::EmbeddedStore> {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
         CipherEngine::new(store, CipherConfig::default())
             .await
             .unwrap()
@@ -696,7 +664,7 @@ mod tests {
             .encrypt("test", &plaintext, None, None, false)
             .unwrap();
         let dec = engine.decrypt("test", &enc.ciphertext, None).unwrap();
-        assert_eq!(dec.plaintext, b"hello world");
+        assert_eq!(dec.plaintext.as_bytes(), b"hello world");
     }
 
     #[tokio::test]
@@ -716,7 +684,7 @@ mod tests {
         let dec = engine
             .decrypt("test", &enc.ciphertext, Some("user-123"))
             .unwrap();
-        assert_eq!(dec.plaintext, b"secret");
+        assert_eq!(dec.plaintext.as_bytes(), b"secret");
 
         // Wrong context fails
         assert!(
@@ -798,7 +766,7 @@ mod tests {
 
         // Decrypt the rewrapped ciphertext
         let dec = engine.decrypt("test", &rewrapped.ciphertext, None).unwrap();
-        assert_eq!(dec.plaintext, b"rewrap me");
+        assert_eq!(dec.plaintext.as_bytes(), b"rewrap me");
     }
 
     #[tokio::test]
@@ -815,7 +783,7 @@ mod tests {
 
         // Unwrap the key via decrypt
         let dec = engine.decrypt("test", &result.wrapped_key, None).unwrap();
-        assert_eq!(dec.plaintext, result.plaintext_key);
+        assert_eq!(dec.plaintext.as_bytes(), result.plaintext_key.as_bytes());
     }
 
     #[tokio::test]
@@ -829,7 +797,7 @@ mod tests {
         let data = STANDARD.encode(b"sign this");
         let sig = engine.sign("signing", &data).unwrap();
         let valid = engine
-            .verify_signature("signing", &data, &hex::encode(&sig.signature))
+            .verify_signature("signing", &data, &hex::encode(sig.signature.as_bytes()))
             .unwrap();
         assert!(valid);
     }
@@ -915,7 +883,7 @@ mod tests {
         let plaintext = STANDARD.encode(b"chacha data");
         let enc = engine.encrypt("cc", &plaintext, None, None, false).unwrap();
         let dec = engine.decrypt("cc", &enc.ciphertext, None).unwrap();
-        assert_eq!(dec.plaintext, b"chacha data");
+        assert_eq!(dec.plaintext.as_bytes(), b"chacha data");
     }
 
     #[tokio::test]
@@ -929,8 +897,105 @@ mod tests {
         let data = STANDARD.encode(b"hmac data");
         let sig = engine.sign("hmac", &data).unwrap();
         let valid = engine
-            .verify_signature("hmac", &data, &hex::encode(&sig.signature))
+            .verify_signature("hmac", &data, &hex::encode(sig.signature.as_bytes()))
             .unwrap();
         assert!(valid);
+    }
+
+    #[tokio::test]
+    async fn decrypt_with_retired_key_rejected() {
+        let engine = setup().await;
+        engine
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .await
+            .unwrap();
+
+        let plaintext = STANDARD.encode(b"data");
+        let enc = engine
+            .encrypt("test", &plaintext, None, None, false)
+            .unwrap();
+        let original_version = enc.key_version;
+
+        // Rotate twice to push v1 from Active → Draining → Retired
+        engine.rotate("test", true, false).await.unwrap();
+        engine.rotate("test", true, false).await.unwrap();
+
+        // Manually retire v1 by running the scheduler cycle
+        engine
+            .keyrings
+            .update("test", |kr| {
+                for kv in &mut kr.key_versions {
+                    if kv.version == original_version {
+                        kv.state = KeyState::Retired;
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        // Attempt to decrypt with retired key version
+        let err = engine.decrypt("test", &enc.ciphertext, None).unwrap_err();
+        assert!(
+            matches!(err, CipherError::KeyVersionRetired { .. }),
+            "expected KeyVersionRetired, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn double_rotation_creates_two_draining() {
+        let engine = setup().await;
+        engine
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .await
+            .unwrap();
+
+        // First rotation: v1 Active → Draining, v2 Active
+        let r1 = engine.rotate("test", true, false).await.unwrap();
+        assert!(r1.rotated);
+        assert_eq!(r1.key_version, 2);
+
+        // Second rotation: v2 Active → Draining, v3 Active
+        let r2 = engine.rotate("test", true, false).await.unwrap();
+        assert!(r2.rotated);
+        assert_eq!(r2.key_version, 3);
+
+        // Verify key states
+        let info = engine.key_info("test").unwrap();
+        let versions = info.versions.as_array().unwrap();
+        assert_eq!(versions.len(), 3);
+
+        // v1 and v2 should be Draining, v3 should be Active
+        assert_eq!(versions[0]["state"].as_str().unwrap(), "Draining");
+        assert_eq!(versions[1]["state"].as_str().unwrap(), "Draining");
+        assert_eq!(versions[2]["state"].as_str().unwrap(), "Active");
+
+        // Data encrypted with v1 should still decrypt (v1 is Draining, not Retired)
+        let plaintext = STANDARD.encode(b"old data");
+        let enc = engine
+            .encrypt("test", &plaintext, None, Some(1), false)
+            .unwrap();
+        let dec = engine.decrypt("test", &enc.ciphertext, None).unwrap();
+        assert_eq!(dec.plaintext.as_bytes(), b"old data");
+    }
+
+    #[tokio::test]
+    async fn sensitive_bytes_debug_is_redacted() {
+        let engine = setup().await;
+        engine
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false)
+            .await
+            .unwrap();
+
+        let plaintext = STANDARD.encode(b"secret data");
+        let result = engine
+            .encrypt("test", &plaintext, None, None, false)
+            .unwrap();
+        let dec = engine.decrypt("test", &result.ciphertext, None).unwrap();
+
+        // Debug output must not contain the plaintext
+        let debug = format!("{dec:?}");
+        assert!(!debug.contains("secret data"));
+        assert!(debug.contains("REDACTED"));
     }
 }

@@ -265,7 +265,9 @@ impl CipherClient {
             .command(&["VERIFY_SIGNATURE", keyring, data_b64, signature_hex])
             .await?;
         check_status(&resp)?;
-        Ok(resp["valid"].as_bool().unwrap_or(false))
+        resp["valid"]
+            .as_bool()
+            .ok_or_else(|| ClientError::ResponseFormat("missing valid field".into()))
     }
 
     /// Rotate a keyring.
@@ -286,7 +288,9 @@ impl CipherClient {
                 .ok_or_else(|| ClientError::ResponseFormat("missing key_version".into()))?
                 as u32,
             previous_version: resp["previous_version"].as_u64().map(|v| v as u32),
-            rotated: resp["rotated"].as_bool().unwrap_or(false),
+            rotated: resp["rotated"]
+                .as_bool()
+                .ok_or_else(|| ClientError::ResponseFormat("missing rotated field".into()))?,
         })
     }
 

@@ -260,43 +260,9 @@ pub fn find_key_version(keyring: &Keyring, version: u32) -> Result<&KeyVersion, 
 mod tests {
     use super::*;
 
-    async fn create_test_store() -> Arc<shroudb_storage::EmbeddedStore> {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let config = shroudb_storage::StorageEngineConfig {
-            data_dir: dir,
-            ..Default::default()
-        };
-        let engine = shroudb_storage::StorageEngine::open(config, &EphemeralKey)
-            .await
-            .unwrap();
-        Arc::new(shroudb_storage::EmbeddedStore::new(
-            Arc::new(engine),
-            "cipher-test",
-        ))
-    }
-
-    struct EphemeralKey;
-    impl shroudb_storage::MasterKeySource for EphemeralKey {
-        fn source_name(&self) -> &str {
-            "ephemeral-test"
-        }
-        fn load<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                    > + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async { Ok(shroudb_crypto::SecretBytes::new(vec![0x42u8; 32])) })
-        }
-    }
-
     #[tokio::test]
     async fn create_and_get_keyring() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
         let mgr = KeyringManager::new(store);
         mgr.init().await.unwrap();
 
@@ -321,7 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_duplicate_keyring_fails() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
         let mgr = KeyringManager::new(store);
         mgr.init().await.unwrap();
 
@@ -345,7 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_keyrings() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
         let mgr = KeyringManager::new(store);
         mgr.init().await.unwrap();
 
@@ -367,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn persistence_survives_reload() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
 
         // Create keyring with first manager
         let mgr1 = KeyringManager::new(store.clone());
@@ -390,7 +356,7 @@ mod tests {
 
     #[tokio::test]
     async fn seed_if_absent_creates_new() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
         let mgr = KeyringManager::new(store);
         mgr.init().await.unwrap();
 
@@ -415,7 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn find_active_and_versioned_keys() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
         let mgr = KeyringManager::new(store);
         mgr.init().await.unwrap();
 

@@ -70,9 +70,13 @@ fn build_obfusbit() -> Obfusbit {
     let base = ENVELOPE_ALPHABET.chars().count() as f64;
     let key_length = (total_bits as f64 / base.log2()).ceil() as u32;
 
-    let obfuskey =
-        Obfuskey::new(ENVELOPE_ALPHABET, Some(key_length), None).expect("valid obfuskey config");
-    Obfusbit::new(schema, Some(obfuskey)).expect("valid obfusbit schema")
+    let obfuskey = Obfuskey::new(ENVELOPE_ALPHABET, Some(key_length), None).unwrap_or_else(|e| {
+        panic!(
+            "obfuskey init failed (alphabet={ENVELOPE_ALPHABET:?}, key_length={key_length}): {e}"
+        )
+    });
+    Obfusbit::new(schema, Some(obfuskey))
+        .unwrap_or_else(|e| panic!("obfusbit init failed (bits={total_bits}): {e}"))
 }
 
 static OBFUSBIT: LazyLock<std::sync::Mutex<Obfusbit>> =
@@ -304,6 +308,13 @@ mod tests {
                 .validate_algorithm(KeyringAlgorithm::ChaCha20Poly1305)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn build_obfusbit_succeeds() {
+        // Verify the compile-time-constant obfusbit initialization doesn't panic.
+        // This catches regressions if ENVELOPE_ALPHABET or bit widths change.
+        let _guard = OBFUSBIT.lock().unwrap();
     }
 
     #[test]

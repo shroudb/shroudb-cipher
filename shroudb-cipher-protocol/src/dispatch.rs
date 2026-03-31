@@ -107,7 +107,7 @@ pub async fn dispatch<S: Store>(
         } => match engine.decrypt(&keyring, &ciphertext, context.as_deref()) {
             Ok(result) => CipherResponse::ok(serde_json::json!({
                 "status": "ok",
-                "plaintext": STANDARD.encode(&result.plaintext),
+                "plaintext": STANDARD.encode(result.plaintext.as_bytes()),
             })),
             Err(e) => CipherResponse::error(e.to_string()),
         },
@@ -131,7 +131,7 @@ pub async fn dispatch<S: Store>(
             match engine.generate_data_key(&keyring, bits) {
                 Ok(result) => CipherResponse::ok(serde_json::json!({
                     "status": "ok",
-                    "plaintext_key": STANDARD.encode(&result.plaintext_key),
+                    "plaintext_key": STANDARD.encode(result.plaintext_key.as_bytes()),
                     "wrapped_key": result.wrapped_key,
                     "key_version": result.key_version,
                 })),
@@ -143,7 +143,7 @@ pub async fn dispatch<S: Store>(
         CipherCommand::Sign { keyring, data } => match engine.sign(&keyring, &data) {
             Ok(result) => CipherResponse::ok(serde_json::json!({
                 "status": "ok",
-                "signature": hex::encode(&result.signature),
+                "signature": hex::encode(result.signature.as_bytes()),
                 "key_version": result.key_version,
             })),
             Err(e) => CipherResponse::error(e.to_string()),
@@ -204,51 +204,15 @@ pub async fn dispatch<S: Store>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::commands::parse_command;
     use shroudb_cipher_engine::engine::CipherConfig;
 
     async fn setup() -> CipherEngine<shroudb_storage::EmbeddedStore> {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
         CipherEngine::new(store, CipherConfig::default())
             .await
             .unwrap()
-    }
-
-    async fn create_test_store() -> Arc<shroudb_storage::EmbeddedStore> {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let config = shroudb_storage::StorageEngineConfig {
-            data_dir: dir,
-            ..Default::default()
-        };
-        let engine = shroudb_storage::StorageEngine::open(config, &EphemeralKey)
-            .await
-            .unwrap();
-        Arc::new(shroudb_storage::EmbeddedStore::new(
-            Arc::new(engine),
-            "cipher-test",
-        ))
-    }
-
-    struct EphemeralKey;
-    impl shroudb_storage::MasterKeySource for EphemeralKey {
-        fn source_name(&self) -> &str {
-            "ephemeral-test"
-        }
-        fn load<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                    > + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async { Ok(shroudb_crypto::SecretBytes::new(vec![0x42u8; 32])) })
-        }
     }
 
     #[tokio::test]
