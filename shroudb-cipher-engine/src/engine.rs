@@ -1051,6 +1051,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_encrypt_during_rotation() {
+        let engine = Arc::new(setup().await);
+        engine
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
+            .await
+            .unwrap();
+
+        let mut handles = Vec::new();
+
+        // Spawn 10 tasks that each encrypt 5 values
+        for task_id in 0..10u32 {
+            let eng = Arc::clone(&engine);
+            handles.push(tokio::spawn(async move {
+                let mut results = Vec::new();
+                for i in 0..5u32 {
+                    let plaintext = STANDARD.encode(format!("task-{task_id}-item-{i}").as_bytes());
+                    let enc = eng.encrypt("test", &plaintext, None, None, false).unwrap();
+                    results.push((format!("task-{task_id}-item-{i}"), enc));
+                }
+                results
+            }));
+        }
+
+        // Rotate while encrypts are in flight
+        engine.rotate("test", true, false, None).await.unwrap();
+
+        // Collect all results — no task should have panicked
+        let mut all_results = Vec::new();
+        for handle in handles {
+            let results = handle.await.unwrap();
+            all_results.extend(results);
+        }
+
+        assert_eq!(all_results.len(), 50);
+
+        // Every ciphertext must be decryptable
+        for (original, enc) in &all_results {
+            let dec = engine.decrypt("test", &enc.ciphertext, None).unwrap();
+            assert_eq!(
+                dec.plaintext.as_bytes(),
+                original.as_bytes(),
+                "decryption mismatch for {original}"
+            );
+            // Key version should be 1 (original) or 2 (post-rotation)
+            assert!(
+                enc.key_version == 1 || enc.key_version == 2,
+                "unexpected key version {}",
+                enc.key_version
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn sensitive_bytes_debug_is_redacted() {
         let engine = setup().await;
         engine

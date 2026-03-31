@@ -36,7 +36,7 @@ impl Default for ServerConfig {
 }
 
 fn default_tcp_bind() -> SocketAddr {
-    "0.0.0.0:6599".parse().unwrap()
+    "0.0.0.0:6599".parse().expect("valid hardcoded address")
 }
 
 #[derive(Debug, Deserialize)]
