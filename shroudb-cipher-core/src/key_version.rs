@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::CipherError;
@@ -6,7 +8,7 @@ use crate::error::CipherError;
 ///
 /// Key material is stored as hex-encoded bytes in serialized form.
 /// In memory, it is held as `SecretBytes` (zeroized on drop).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct KeyVersion {
     pub version: u32,
     pub state: KeyState,
@@ -19,6 +21,27 @@ pub struct KeyVersion {
     pub activated_at: Option<u64>,
     pub draining_since: Option<u64>,
     pub retired_at: Option<u64>,
+}
+
+impl fmt::Debug for KeyVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KeyVersion")
+            .field("version", &self.version)
+            .field("state", &self.state)
+            .field(
+                "key_material",
+                &match &self.key_material {
+                    Some(_) => "[REDACTED]",
+                    None => "None",
+                },
+            )
+            .field("public_key", &self.public_key)
+            .field("created_at", &self.created_at)
+            .field("activated_at", &self.activated_at)
+            .field("draining_since", &self.draining_since)
+            .field("retired_at", &self.retired_at)
+            .finish()
+    }
 }
 
 /// Key lifecycle state machine: Staged -> Active -> Draining -> Retired.
@@ -94,5 +117,25 @@ mod tests {
                 to: KeyState::Retired,
             }
         ));
+    }
+
+    #[test]
+    fn debug_redacts_key_material() {
+        let kv = KeyVersion {
+            version: 1,
+            state: KeyState::Active,
+            key_material: Some("secret".into()),
+            public_key: Some("pub".into()),
+            created_at: 100,
+            activated_at: Some(100),
+            draining_since: None,
+            retired_at: None,
+        };
+        let debug = format!("{:?}", kv);
+        assert!(
+            debug.contains("[REDACTED]"),
+            "expected [REDACTED] in: {debug}"
+        );
+        assert!(!debug.contains("secret"), "key material leaked in: {debug}");
     }
 }
