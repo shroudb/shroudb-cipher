@@ -1222,9 +1222,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shroudb-acl"
-version = "0.1.4"
+version = "0.1.5"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "b13f961886f2eba64b806bb51a4eb55d16a5d3613f6913b68844b534ba50e9b0"
+checksum = "790d153413e9fc8a96baad182fbf6a060fa60bd9acf27413d0069f73dfef2a3c"
 dependencies = [
  "serde",
  "shroudb-crypto",
@@ -1245,7 +1245,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-cli"
-version = "1.4.7"
+version = "1.4.8"
 dependencies = [
  "anyhow",
  "clap",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-client"
-version = "1.4.7"
+version = "1.4.8"
 dependencies = [
  "serde",
  "serde_json",
@@ -1267,7 +1267,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-core"
-version = "1.4.7"
+version = "1.4.8"
 dependencies = [
  "base64",
  "hex",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-engine"
-version = "1.4.7"
+version = "1.4.8"
 dependencies = [
  "base64",
  "dashmap",
@@ -1304,7 +1304,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-protocol"
-version = "1.4.7"
+version = "1.4.8"
 dependencies = [
  "base64",
  "hex",
@@ -1322,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-server"
-version = "1.4.7"
+version = "1.4.8"
 dependencies = [
  "anyhow",
  "clap",
