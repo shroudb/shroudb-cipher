@@ -1245,7 +1245,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-cli"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-client"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -1266,7 +1266,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-core"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "base64",
  "hex",
@@ -1280,7 +1280,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-engine"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "base64",
  "dashmap",
@@ -1302,7 +1302,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-protocol"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "base64",
  "hex",
@@ -1320,7 +1320,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-cipher-server"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "anyhow",
  "clap",
