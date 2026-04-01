@@ -67,6 +67,3 @@ uuid = { version = "1", features = ["v4"] }
 hex = "0.4"
 base64 = "0.22"
 dashmap = "6"
-
-[patch.'sparse+https://crates.shroudb.dev/api/v1/crates/']
-shroudb-courier-core = { path = "../shroudb-courier/shroudb-courier-core" }
