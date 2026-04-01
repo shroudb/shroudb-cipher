@@ -9,10 +9,6 @@ use shroudb_cipher_core::keyring::KeyringAlgorithm;
 use shroudb_cipher_engine::engine::{CipherConfig, CipherEngine};
 use shroudb_cipher_engine::keyring_manager::KeyringCreateOpts;
 use shroudb_cipher_engine::scheduler;
-use shroudb_storage::{
-    ChainedMasterKeySource, EnvMasterKey, EphemeralKey, FileMasterKey, MasterKeySource,
-    StorageEngineConfig,
-};
 
 use crate::config::load_config;
 
@@ -46,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     // Load config
     let mut cfg = load_config(cli.config.as_deref())?;
 
-    // Logging
+    // Resolve log level
     let log_level = if cli.log_level != "info" {
         cli.log_level.clone()
     } else {
@@ -55,15 +51,9 @@ async fn main() -> anyhow::Result<()> {
             .take()
             .unwrap_or_else(|| "info".to_string())
     };
-    let filter = tracing_subscriber::EnvFilter::try_new(&log_level)
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .json()
-        .init();
 
-    // Disable core dumps — sensitive key material must not leak to disk.
-    shroudb_crypto::disable_core_dumps();
+    // Bootstrap: logging + core dumps + key source
+    let key_source = shroudb_server_bootstrap::bootstrap(&log_level);
 
     // CLI overrides
     if let Some(ref dir) = cli.data_dir {
@@ -81,25 +71,11 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // Master key
-    let key_source: Box<dyn MasterKeySource> = Box::new(ChainedMasterKeySource::new(vec![
-        Box::new(EnvMasterKey::new()),
-        Box::new(FileMasterKey::new()),
-        Box::new(EphemeralKey),
-    ]));
-
     // Storage engine
-    let engine_config = StorageEngineConfig {
-        data_dir: cfg.store.data_dir.clone(),
-        ..Default::default()
-    };
-    let storage_engine = shroudb_storage::StorageEngine::open(engine_config, key_source.as_ref())
+    let storage = shroudb_server_bootstrap::open_storage(&cfg.store.data_dir, key_source.as_ref())
         .await
         .context("failed to open storage engine")?;
-    let store = Arc::new(shroudb_storage::EmbeddedStore::new(
-        Arc::new(storage_engine),
-        "cipher",
-    ));
+    let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "cipher"));
 
     // Cipher engine
     let cipher_config = CipherConfig {
@@ -166,29 +142,15 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Banner
-    eprintln!();
-    eprintln!("Cipher v{}", env!("CARGO_PKG_VERSION"));
-    eprintln!("├─ tcp:     {}", cfg.server.tcp_bind);
-    eprintln!("├─ data:    {}", cfg.store.data_dir.display());
-    eprintln!(
-        "└─ key:     {}",
-        if std::env::var("SHROUDB_MASTER_KEY").is_ok()
-            || std::env::var("SHROUDB_MASTER_KEY_FILE").is_ok()
-        {
-            "configured"
-        } else {
-            "ephemeral (dev mode)"
-        }
+    shroudb_server_bootstrap::print_banner(
+        "Cipher",
+        env!("CARGO_PKG_VERSION"),
+        &cfg.server.tcp_bind.to_string(),
+        &cfg.store.data_dir,
     );
-    eprintln!();
-    eprintln!("Ready.");
 
     // Wait for shutdown
-    tokio::signal::ctrl_c()
-        .await
-        .context("failed to listen for ctrl-c")?;
-    tracing::info!("shutting down");
-    let _ = shutdown_tx.send(true);
+    shroudb_server_bootstrap::wait_for_shutdown(shutdown_tx).await?;
     let _ = tcp_handle.await;
 
     Ok(())
