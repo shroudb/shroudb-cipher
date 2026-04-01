@@ -147,11 +147,16 @@ impl<S: Store> CipherEngine<S> {
     }
 
     /// Emit an audit event to Chronicle. If chronicle is not configured, this
-    /// is a no-op. If recording fails, we log at warn level but never fail the
-    /// calling operation — Cipher is infrastructure that other engines depend on.
-    async fn emit_audit_event(&self, operation: &str, resource: &str, actor: &str) {
+    /// is a no-op. If chronicle is configured but unreachable, returns an error
+    /// so security-critical callers can fail closed.
+    async fn emit_audit_event(
+        &self,
+        operation: &str,
+        resource: &str,
+        actor: &str,
+    ) -> Result<(), CipherError> {
         let Some(chronicle) = &self.chronicle else {
-            return;
+            return Ok(());
         };
         let event = Event::new(
             ChronicleEngine::Cipher,
@@ -160,14 +165,11 @@ impl<S: Store> CipherEngine<S> {
             EventResult::Ok,
             actor.to_string(),
         );
-        if let Err(e) = chronicle.record(event).await {
-            tracing::warn!(
-                operation,
-                resource,
-                error = %e,
-                "failed to record audit event to chronicle"
-            );
-        }
+        chronicle
+            .record(event)
+            .await
+            .map_err(|e| CipherError::Internal(format!("audit failed: {e}")))?;
+        Ok(())
     }
 
     // ── Keyring management ─────────────────────────────────────────
@@ -196,7 +198,7 @@ impl<S: Store> CipherEngine<S> {
             )
             .await?;
         self.emit_audit_event("keyring_create", name, actor.unwrap_or(""))
-            .await;
+            .await?;
         Ok(build_key_info(&kr))
     }
 
@@ -280,7 +282,7 @@ impl<S: Store> CipherEngine<S> {
             ciphertext: envelope.encode()?,
             key_version: kv.version,
         };
-        self.emit_audit_event("encrypt", keyring_name, "").await;
+        self.emit_audit_event("encrypt", keyring_name, "").await?;
         Ok(result)
     }
 
@@ -318,7 +320,7 @@ impl<S: Store> CipherEngine<S> {
             aad,
         )?;
 
-        self.emit_audit_event("decrypt", keyring_name, "").await;
+        let _ = self.emit_audit_event("decrypt", keyring_name, "").await;
         Ok(DecryptResult {
             plaintext: plaintext.into(),
         })
@@ -474,7 +476,7 @@ impl<S: Store> CipherEngine<S> {
             signature: signature.into(),
             key_version: active_kv.version,
         };
-        self.emit_audit_event("sign", keyring_name, "").await;
+        self.emit_audit_event("sign", keyring_name, "").await?;
         Ok(result)
     }
 
@@ -638,7 +640,7 @@ impl<S: Store> CipherEngine<S> {
         );
 
         self.emit_audit_event("rotate", keyring_name, actor.unwrap_or(""))
-            .await;
+            .await?;
 
         Ok(RotateResult {
             key_version: new_active.version,
