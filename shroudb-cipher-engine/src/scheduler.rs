@@ -12,6 +12,9 @@ use crate::engine::CipherEngine;
 use crate::keyring_manager::find_active_key;
 
 /// Start the background scheduler that auto-rotates and auto-retires keys.
+///
+/// If a `CourierOps` capability is configured on the engine, the scheduler
+/// sends notifications on key rotation events.
 pub fn start_scheduler<S: Store + 'static>(
     engine: Arc<CipherEngine<S>>,
     interval_secs: u64,
@@ -66,6 +69,24 @@ async fn run_cycle<S: Store>(engine: &CipherEngine<S>) -> Result<(), String> {
                             new_version = result.key_version,
                             "auto-rotated key"
                         );
+                        if let Some(c) = engine.courier()
+                            && let Err(e) = c
+                                .notify(
+                                    "ops",
+                                    "Key rotated",
+                                    &format!(
+                                        "Keyring '{}' rotated to v{}",
+                                        name, result.key_version
+                                    ),
+                                )
+                                .await
+                        {
+                            tracing::warn!(
+                                keyring = name,
+                                error = %e,
+                                "failed to send rotation notification"
+                            );
+                        }
                     }
                     Err(e) => {
                         tracing::warn!(keyring = name, error = %e, "auto-rotation failed");

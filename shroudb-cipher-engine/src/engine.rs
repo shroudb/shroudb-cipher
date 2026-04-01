@@ -11,6 +11,7 @@ use shroudb_cipher_core::error::CipherError;
 use shroudb_cipher_core::key_version::KeyState;
 use shroudb_cipher_core::keyring::KeyringAlgorithm;
 use shroudb_cipher_core::policy::KeyringOperation;
+use shroudb_courier_core::ops::CourierOps;
 use shroudb_crypto::{SecretBytes, SensitiveBytes};
 use shroudb_store::Store;
 
@@ -90,6 +91,7 @@ pub struct CipherEngine<S: Store> {
     pub(crate) config: CipherConfig,
     policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
     chronicle: Option<Arc<dyn ChronicleOps>>,
+    courier: Option<Arc<dyn CourierOps>>,
 }
 
 impl<S: Store> CipherEngine<S> {
@@ -107,7 +109,32 @@ impl<S: Store> CipherEngine<S> {
             config,
             policy_evaluator,
             chronicle,
+            courier: None,
         })
+    }
+
+    /// Create a new Cipher engine with all capability traits.
+    pub async fn new_with_capabilities(
+        store: Arc<S>,
+        config: CipherConfig,
+        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+        chronicle: Option<Arc<dyn ChronicleOps>>,
+        courier: Option<Arc<dyn CourierOps>>,
+    ) -> Result<Self, CipherError> {
+        let keyrings = KeyringManager::new(store);
+        keyrings.init().await?;
+        Ok(Self {
+            keyrings,
+            config,
+            policy_evaluator,
+            chronicle,
+            courier,
+        })
+    }
+
+    /// Access the courier capability (if configured).
+    pub fn courier(&self) -> Option<&Arc<dyn CourierOps>> {
+        self.courier.as_ref()
     }
 
     async fn check_policy(

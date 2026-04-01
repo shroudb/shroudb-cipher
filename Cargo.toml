@@ -34,6 +34,7 @@ shroudb-protocol-wire = { version = "0.1.0", registry = "shroudb" }
 shroudb-server-tcp = { version = "0.1.0", registry = "shroudb" }
 shroudb-server-bootstrap = { version = "0.1.0", registry = "shroudb" }
 shroudb-client-common = { version = "0.1.0", registry = "shroudb" }
+shroudb-courier-core = { version = "1.3.4", registry = "shroudb" }
 
 # Crypto
 ring = "0.17"
@@ -66,3 +67,6 @@ uuid = { version = "1", features = ["v4"] }
 hex = "0.4"
 base64 = "0.22"
 dashmap = "6"
+
+[patch.'sparse+https://crates.shroudb.dev/api/v1/crates/']
+shroudb-courier-core = { path = "../shroudb-courier/shroudb-courier-core" }

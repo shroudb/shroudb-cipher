@@ -1292,6 +1292,7 @@ dependencies = [
  "shroudb-acl",
  "shroudb-chronicle-core",
  "shroudb-cipher-core",
+ "shroudb-courier-core",
  "shroudb-crypto",
  "shroudb-storage",
  "shroudb-store",
@@ -1352,6 +1353,16 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "shroudb-courier-core"
+version = "1.3.6"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "zeroize",
 ]
 
 [[package]]
