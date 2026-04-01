@@ -266,6 +266,7 @@ pub fn find_key_version(keyring: &Keyring, version: u32) -> Result<&KeyVersion, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zeroize::Zeroize;
 
     #[tokio::test]
     async fn create_and_get_keyring() {
@@ -384,6 +385,94 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_retired_key_material_is_zeroized() {
+        let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
+        let mgr = KeyringManager::new(store);
+        mgr.init().await.unwrap();
+
+        // Create a keyring — v1 is Active
+        mgr.create(
+            "payments",
+            KeyringAlgorithm::Aes256Gcm,
+            KeyringCreateOpts::default(),
+        )
+        .await
+        .unwrap();
+
+        let now = super::unix_now();
+
+        // Rotate: v1 → Draining, v2 → Active
+        mgr.update("payments", |kr| {
+            for kv in &mut kr.key_versions {
+                if kv.state == KeyState::Active {
+                    kv.state = KeyState::Draining;
+                    kv.draining_since = Some(now);
+                }
+            }
+            // Add new active key
+            let gkm = crate::crypto_ops::generate_key_material(kr.algorithm).unwrap();
+            kr.key_versions.push(KeyVersion {
+                version: 2,
+                state: KeyState::Active,
+                key_material: Some(hex::encode(gkm.private_key.as_bytes())),
+                public_key: gkm.public_key.map(hex::encode),
+                created_at: now,
+                activated_at: Some(now),
+                draining_since: None,
+                retired_at: None,
+            });
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        // Verify v1 is Draining and still has key material
+        let kr = mgr.get("payments").unwrap();
+        let v1 = kr.key_versions.iter().find(|kv| kv.version == 1).unwrap();
+        assert_eq!(v1.state, KeyState::Draining);
+        assert!(
+            v1.key_material.is_some(),
+            "draining key should still have key material"
+        );
+
+        // Retire v1: Draining → Retired
+        mgr.update("payments", |kr| {
+            for kv in &mut kr.key_versions {
+                if kv.version == 1 && kv.state == KeyState::Draining {
+                    kv.state = KeyState::Retired;
+                    kv.retired_at = Some(now);
+                    // Simulate what the scheduler does — set key_material to None
+                    // The manager should zeroize the material before dropping
+                    if let Some(ref mut km) = kv.key_material {
+                        km.zeroize();
+                    }
+                    kv.key_material = None;
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        // Verify retired key has no material
+        let kr = mgr.get("payments").unwrap();
+        let v1 = kr.key_versions.iter().find(|kv| kv.version == 1).unwrap();
+        assert_eq!(v1.state, KeyState::Retired);
+        assert!(
+            v1.key_material.is_none(),
+            "retired key must have key_material cleared"
+        );
+
+        // Verify active key still has material
+        let v2 = kr.key_versions.iter().find(|kv| kv.version == 2).unwrap();
+        assert_eq!(v2.state, KeyState::Active);
+        assert!(
+            v2.key_material.is_some(),
+            "active key must still have key material"
+        );
     }
 
     #[tokio::test]

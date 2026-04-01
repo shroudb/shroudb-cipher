@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use shroudb_cipher_core::key_version::KeyState;
 use shroudb_store::Store;
 use tokio::sync::watch;
+use zeroize::Zeroize;
 
 use crate::engine::CipherEngine;
 use crate::keyring_manager::find_active_key;
@@ -94,7 +95,10 @@ async fn run_cycle<S: Store>(engine: &CipherEngine<S>) -> Result<(), String> {
                         if should_retire.contains(&kv.version) && kv.state == KeyState::Draining {
                             kv.state = KeyState::Retired;
                             kv.retired_at = Some(now);
-                            // Clear key material from retired keys
+                            // Zeroize key material before dropping
+                            if let Some(ref mut km) = kv.key_material {
+                                km.zeroize();
+                            }
                             kv.key_material = None;
                             tracing::info!(
                                 keyring = kr.name,

@@ -738,6 +738,7 @@ use shroudb_cipher_core::key_version::KeyVersion;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zeroize::Zeroize;
 
     async fn setup() -> CipherEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
@@ -1063,6 +1064,11 @@ mod tests {
                 for kv in &mut kr.key_versions {
                     if kv.version == original_version {
                         kv.state = KeyState::Retired;
+                        kv.retired_at = Some(0);
+                        if let Some(ref mut km) = kv.key_material {
+                            km.zeroize();
+                        }
+                        kv.key_material = None;
                     }
                 }
                 Ok(())
