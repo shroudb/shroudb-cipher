@@ -22,6 +22,7 @@ RUN --mount=type=secret,id=registry_token \
 # --- shroudb-cipher: encryption-as-a-service engine ---
 FROM alpine:3.21 AS shroudb-cipher
 RUN adduser -D -u 65532 shroudb && \
+    apk add --no-cache su-exec && \
     mkdir /data && chown shroudb:shroudb /data
 LABEL org.opencontainers.image.title="ShrouDB Cipher" \
       org.opencontainers.image.description="Encryption-as-a-service engine with keyring lifecycle management" \
@@ -30,11 +31,13 @@ LABEL org.opencontainers.image.title="ShrouDB Cipher" \
       org.opencontainers.image.source="https://github.com/shroudb/shroudb-cipher" \
       org.opencontainers.image.licenses="MIT OR Apache-2.0"
 COPY --from=builder /out/shroudb-cipher /shroudb-cipher
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 VOLUME /data
 WORKDIR /data
-USER shroudb
 EXPOSE 6599
-ENTRYPOINT ["/shroudb-cipher"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["/shroudb-cipher"]
 
 # --- shroudb-cipher-cli: CLI tool ---
 FROM alpine:3.21 AS shroudb-cipher-cli
