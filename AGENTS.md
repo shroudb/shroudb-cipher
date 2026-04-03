@@ -18,6 +18,7 @@ shroudb-cipher-protocol/  # RESP3 command parsing + dispatch
 shroudb-cipher-server/    # Standalone TCP binary
 shroudb-cipher-client/    # Typed Rust SDK
 shroudb-cipher-cli/       # CLI tool
+shroudb-cipher-blind/     # Client-side encryption (E2EE, CiphertextEnvelope-compatible)
 ```
 
 ## RESP3 Commands
@@ -163,6 +164,25 @@ In Moat (embedded mode), these calls go through direct method invocation on `Cip
 - Convergent encryption requires both the `CONVERGENT` flag on the command AND `convergent=true` on the keyring
 - The obfuscated prefix is NOT encryption — it hides version/algo metadata but is reversible. Security comes from the AES-256-GCM payload.
 
+## Client-Side Encryption (shroudb-cipher-blind)
+
+`shroudb-cipher-blind` provides client-side encryption for E2EE workflows. The client holds its own keys; the Cipher server never sees plaintext.
+
+### API
+
+| Function / Type | Description |
+|----------------|-------------|
+| `ClientKey::generate()` | Generate random key from CSPRNG |
+| `ClientKey::from_bytes(bytes)` | Construct from 32-byte key material |
+| `ClientKey::derive(secret, info)` | Derive key via HKDF-SHA256 |
+| `encrypt(key, algorithm, plaintext)` | Encrypt with random nonce (AES-256-GCM or ChaCha20-Poly1305) |
+| `decrypt(key, envelope)` | Decrypt a CiphertextEnvelope |
+| `encrypt_convergent(key, algorithm, plaintext, context)` | Deterministic encryption with HMAC-derived nonce |
+| `Algorithm::Aes256Gcm` | AES-256-GCM variant |
+| `Algorithm::ChaCha20Poly1305` | ChaCha20-Poly1305 variant |
+
+Output is wire-compatible with `CiphertextEnvelope` from `shroudb-cipher-core`. No server commands are added — this is a client-side library that complements the server.
+
 ## Related Crates
 
 | Crate | Relationship |
@@ -170,6 +190,7 @@ In Moat (embedded mode), these calls go through direct method invocation on `Cip
 | `shroudb-store` | Provides Store trait for keyring persistence |
 | `shroudb-crypto` | AES-256-GCM, ChaCha20-Poly1305, Ed25519, ECDSA primitives |
 | `obfuskey` | Prefix obfuscation for ciphertext envelopes |
+| `shroudb-cipher-blind` | Client-side encryption producing CiphertextEnvelope-compatible output |
 | `shroudb-veil` | Calls Cipher for decrypt/re-encrypt during encrypted search |
 | `shroudb-courier` | Calls Cipher for JIT decryption before notification delivery |
 | `shroudb-sigil` | Calls Cipher for PII field encryption via CipherOps trait |

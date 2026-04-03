@@ -410,3 +410,81 @@ Without arguments, starts interactive REPL mode. With arguments, executes a sing
 | POLICY | Operation denied by keyring policy |
 | DENIED | Authentication required or insufficient permissions |
 | INTERNAL | Unexpected server error |
+
+## Client-Side Encryption (shroudb-cipher-blind)
+
+`shroudb-cipher-blind` is a client-side encryption library for E2EE workflows. The client holds its own keys and encrypts locally. The Cipher server never sees plaintext. Output is wire-compatible with `CiphertextEnvelope` via the shared `shroudb-cipher-core` types.
+
+This crate does not add server commands. It complements the existing server — use server-side encryption for centralized key management and client-side encryption when the server must not have access to plaintext.
+
+### ClientKey
+
+```rust
+use shroudb_cipher_blind::ClientKey;
+
+// Generate a random key
+let key = ClientKey::generate();
+
+// From raw bytes (32 bytes)
+let key = ClientKey::from_bytes(&raw_bytes)?;
+
+// Derive from a master secret via HKDF-SHA256
+let key = ClientKey::derive(master_secret, b"context-info");
+```
+
+| Method | Description |
+|--------|-------------|
+| `ClientKey::generate()` | Generate a new random key from CSPRNG |
+| `ClientKey::from_bytes(bytes)` | Construct from existing 32-byte key material |
+| `ClientKey::derive(secret, info)` | Derive via HKDF-SHA256 with context info |
+
+### Algorithm
+
+```rust
+use shroudb_cipher_blind::Algorithm;
+```
+
+| Variant | Description |
+|---------|-------------|
+| `Algorithm::Aes256Gcm` | AES-256-GCM authenticated encryption |
+| `Algorithm::ChaCha20Poly1305` | ChaCha20-Poly1305 authenticated encryption |
+
+### Encrypt / Decrypt
+
+```rust
+use shroudb_cipher_blind::{ClientKey, Algorithm, encrypt, decrypt};
+
+let key = ClientKey::generate();
+
+// Encrypt with a random nonce
+let envelope = encrypt(&key, Algorithm::Aes256Gcm, plaintext)?;
+
+// Decrypt
+let recovered = decrypt(&key, &envelope)?;
+assert_eq!(recovered, plaintext);
+```
+
+Both `encrypt` and `decrypt` work with `CiphertextEnvelope` — the same envelope format used by the Cipher server.
+
+### Convergent Encryption
+
+```rust
+use shroudb_cipher_blind::{ClientKey, Algorithm, encrypt_convergent};
+
+let key = ClientKey::generate();
+
+// Deterministic encryption: same plaintext + context = same ciphertext
+let envelope = encrypt_convergent(&key, Algorithm::Aes256Gcm, plaintext, b"context")?;
+```
+
+The nonce is derived via `HMAC-SHA256(key, plaintext || context)[:12]` instead of a random CSPRNG nonce. This produces identical ciphertext for identical inputs, enabling equality checks and deduplication at the cost of leaking plaintext equality.
+
+### When to Use Which
+
+| Scenario | Use |
+|----------|-----|
+| Application trusts the Cipher server to manage keys | Server-side (`ENCRYPT`/`DECRYPT` commands) |
+| Key rotation and lifecycle management needed | Server-side (automatic rotation, draining, REWRAP) |
+| End-to-end encryption, server must not see plaintext | Client-side (`shroudb-cipher-blind`) |
+| User-owned secrets where only the user holds the key | Client-side (`shroudb-cipher-blind`) |
+| Both centralized ops and E2EE in the same application | Mix both — they share the same envelope format |

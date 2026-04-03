@@ -12,6 +12,7 @@ Applications that handle encryption face a common problem: managing cryptographi
 - **Envelope encryption** (GENERATE_DATA_KEY) for large data
 - **Convergent encryption** for deterministic ciphertext when needed
 - **REWRAP** to migrate ciphertext to new key versions without exposing plaintext
+- **Client-side encryption** via `shroudb-cipher-blind` for E2EE workflows where the server must not see plaintext
 
 ## For Technical Leaders: Architecture and Trade-offs
 
@@ -65,6 +66,21 @@ The prefix encodes key version (16 bits) and algorithm ID (4 bits) via Obfusbit 
 - **Auto-rotation:** Background scheduler checks keyrings every hour (configurable). Keys exceeding `rotation_days` are auto-rotated. Draining keys exceeding `drain_days` are auto-retired (material cleared).
 - **Authentication:** Token-based via `shroudb-acl`. Disabled by default (dev mode). When enabled, connections must AUTH before protected operations.
 - **Security:** Core dumps disabled. Fail-closed on all error paths. No `#[allow]` attributes. Compiler and clippy warnings are errors.
+
+### Client-Side Encryption (shroudb-cipher-blind)
+
+Not all encryption belongs on the server. When the application requires end-to-end encryption — where the server must never see plaintext — `shroudb-cipher-blind` provides client-side encryption that produces `CiphertextEnvelope`-compatible output.
+
+The client generates or derives its own `ClientKey` and encrypts locally with AES-256-GCM or ChaCha20-Poly1305. The output uses the same envelope format as server-side encryption (shared via `shroudb-cipher-core`), so both models can coexist in a single data store.
+
+| Concern | Server-side | Client-side (blind) |
+|---------|------------|-------------------|
+| Who holds the key | Cipher server | Client application |
+| Key rotation | Automatic (scheduler) | Application-managed |
+| REWRAP support | Yes | No (application re-encrypts) |
+| Plaintext visibility | Server sees plaintext | Server never sees plaintext |
+| Convergent mode | Yes | Yes (HMAC-derived nonce) |
+| Wire format | CiphertextEnvelope | CiphertextEnvelope (same) |
 
 ### Ecosystem
 

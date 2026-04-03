@@ -137,6 +137,21 @@ docker run -d \
   shroudb/shroudb-cipher
 ```
 
+## Server-Side vs Client-Side Encryption
+
+Cipher supports two encryption models:
+
+| Model | Crate | Key Holder | Use Case |
+|-------|-------|------------|----------|
+| **Server-side** | `shroudb-cipher-server` | Cipher server | Centralized key management, key rotation, REWRAP |
+| **Client-side** | `shroudb-cipher-blind` | Client application | End-to-end encryption, zero-knowledge workflows |
+
+**Server-side (default):** Applications send plaintext to Cipher, which encrypts with server-managed keys. The server handles rotation, draining, and retirement. Use this when you want centralized key lifecycle management.
+
+**Client-side (blind):** Applications hold their own `ClientKey` and encrypt locally. Cipher server never sees the plaintext. Output is wire-compatible with `CiphertextEnvelope` (shared via `shroudb-cipher-core`). Use this for E2EE workflows where the server must not have access to plaintext.
+
+Both models can coexist. An application might use server-side encryption for operational data (where key rotation matters) and client-side encryption for user-owned secrets (where zero-knowledge matters).
+
 ## Architecture
 
 ```
@@ -146,6 +161,7 @@ shroudb-cipher-protocol/    — RESP3 command parsing + dispatch
 shroudb-cipher-server/      — TCP server binary
 shroudb-cipher-client/      — Rust client SDK
 shroudb-cipher-cli/         — CLI tool
+shroudb-cipher-blind/       — client-side encryption (E2EE, CiphertextEnvelope-compatible)
 ```
 
 See [DOCS.md](DOCS.md) for full reference and [ABOUT.md](ABOUT.md) for architecture details.
