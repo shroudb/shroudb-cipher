@@ -1244,6 +1244,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "shroudb-cipher-blind"
+version = "1.4.8"
+dependencies = [
+ "base64",
+ "hex",
+ "ring",
+ "serde",
+ "serde_json",
+ "shroudb-cipher-core",
+ "shroudb-crypto",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
 name = "shroudb-cipher-cli"
 version = "1.4.8"
 dependencies = [

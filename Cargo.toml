@@ -8,6 +8,7 @@ members = [
     "shroudb-cipher-server",
     "shroudb-cipher-client",
     "shroudb-cipher-cli",
+    "shroudb-cipher-blind",
 ]
 
 [workspace.package]
@@ -23,6 +24,7 @@ shroudb-cipher-core = { path = "shroudb-cipher-core", version = "1.4.4", registr
 shroudb-cipher-engine = { path = "shroudb-cipher-engine", version = "1.4.4", registry = "shroudb" }
 shroudb-cipher-protocol = { path = "shroudb-cipher-protocol", version = "1.4.4", registry = "shroudb" }
 shroudb-cipher-client = { path = "shroudb-cipher-client", version = "1.4.4", registry = "shroudb" }
+shroudb-cipher-blind = { path = "shroudb-cipher-blind", version = "1.4.4", registry = "shroudb" }
 
 # ShrouDB commons (shroudb registry)
 shroudb-store = { version = "0.1.2", registry = "shroudb" }
