@@ -12,7 +12,7 @@ name = "shroudb-cipher"
 path = "src/main.rs"
 
 [dependencies]
-shroudb-cipher-core.workspace = true
+shroudb-cipher-core = { workspace = true, features = ["server-crypto"] }
 shroudb-cipher-engine.workspace = true
 shroudb-cipher-protocol.workspace = true
 shroudb-acl.workspace = true

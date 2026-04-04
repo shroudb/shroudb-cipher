@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-shroudb-cipher-core.workspace = true
+shroudb-cipher-core = { workspace = true, features = ["server-crypto"] }
 shroudb-cipher-engine.workspace = true
 shroudb-acl.workspace = true
 shroudb-store.workspace = true
@@ -22,4 +22,4 @@ hex.workspace = true
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 shroudb-storage = { workspace = true, features = ["testing"] }
-shroudb-crypto.workspace = true
+shroudb-crypto = { workspace = true, features = ["server"] }

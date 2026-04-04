@@ -8,9 +8,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-shroudb-cipher-core.workspace = true
+shroudb-cipher-core = { workspace = true, features = ["server-crypto"] }
 shroudb-store.workspace = true
-shroudb-crypto.workspace = true
+shroudb-crypto = { workspace = true, features = ["server"] }
 shroudb-acl.workspace = true
 shroudb-chronicle-core.workspace = true
 shroudb-courier-core.workspace = true
