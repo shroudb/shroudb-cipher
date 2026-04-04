@@ -1,4 +1,4 @@
-# Cipher (formerly Transit) — Agent Instructions
+# Cipher — Agent Instructions
 
 > Encryption-as-a-service engine: key lifecycle management, encrypt/decrypt/rewrap/sign/verify operations with versioned keyrings and automatic rotation.
 
