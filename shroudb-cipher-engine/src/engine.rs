@@ -188,6 +188,7 @@ impl<S: Store> CipherEngine<S> {
         let event = Event::new(
             ChronicleEngine::Cipher,
             operation.to_string(),
+            "keyring".to_string(),
             resource.to_string(),
             EventResult::Ok,
             actor.to_string(),
