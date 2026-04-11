@@ -730,3 +730,67 @@ async fn acl_readonly_token_cannot_encrypt() {
     let err = client.rotate("payments", true).await;
     assert!(err.is_err(), "readonly should not rotate");
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Remote Store Mode: Cipher backed by a remote ShrouDB instance
+// ═══════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn remote_store_encrypt_decrypt_lifecycle() {
+    // Start a ShrouDB server as the remote store backend
+    let Some(shroudb) = common::ShrouDBServer::start().await else {
+        eprintln!("SKIP: shroudb binary not found (build shroudb core first)");
+        return;
+    };
+
+    // Start a cipher server in remote mode pointing to the ShrouDB server
+    let Some(server) = TestServer::start_remote(&shroudb.uri()).await else {
+        panic!("cipher server in remote mode failed to start");
+    };
+
+    let mut client = shroudb_cipher_client::CipherClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect to remote-mode cipher failed");
+
+    // Health check
+    client.health().await.expect("health check failed");
+
+    // Create keyring (state persisted in the remote ShrouDB)
+    client
+        .keyring_create("remote-kr", "aes-256-gcm", None, None, false)
+        .await
+        .expect("keyring create failed");
+
+    // Encrypt
+    let enc = client
+        .encrypt("remote-kr", "cmVtb3Rl", None, None, false)
+        .await
+        .expect("encrypt via remote store failed");
+    assert!(!enc.ciphertext.is_empty());
+
+    // Decrypt
+    let dec = client
+        .decrypt("remote-kr", &enc.ciphertext, None)
+        .await
+        .expect("decrypt via remote store failed");
+    assert_eq!(dec.plaintext, "cmVtb3Rl");
+
+    // Key info
+    let info = client
+        .key_info("remote-kr")
+        .await
+        .expect("key info via remote store failed");
+    assert_eq!(info["keyring"], "remote-kr");
+    assert_eq!(info["algorithm"], "aes-256-gcm");
+}
+
+#[tokio::test]
+async fn remote_store_connection_failure_produces_clean_error() {
+    // Try to start cipher in remote mode pointing to a non-existent ShrouDB
+    let result = TestServer::start_remote("shroudb://127.0.0.1:1").await;
+    // Server should fail to start (connection refused)
+    assert!(
+        result.is_none(),
+        "cipher server should fail to start with unreachable remote store"
+    );
+}

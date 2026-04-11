@@ -16,6 +16,7 @@ shroudb-cipher-core = { workspace = true, features = ["server-crypto"] }
 shroudb-cipher-engine.workspace = true
 shroudb-cipher-protocol.workspace = true
 shroudb-acl.workspace = true
+shroudb-client.workspace = true
 shroudb-store.workspace = true
 shroudb-storage.workspace = true
 shroudb-protocol-wire.workspace = true

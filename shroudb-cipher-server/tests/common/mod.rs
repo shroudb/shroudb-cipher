@@ -60,6 +60,56 @@ impl TestServer {
         Self::start_with_config(TestServerConfig::default()).await
     }
 
+    /// Start a cipher server in remote store mode, pointing to the given ShrouDB URI.
+    pub async fn start_remote(remote_uri: &str) -> Option<Self> {
+        let binary = find_binary()?;
+        let tcp_port = free_port();
+        let tcp_addr = format!("127.0.0.1:{tcp_port}");
+        let data_dir = tempfile::tempdir().ok()?;
+        let config_dir = tempfile::tempdir().ok()?;
+
+        let config_path = config_dir.path().join("config.toml");
+        let toml = generate_remote_config(&tcp_addr, remote_uri);
+        std::fs::write(&config_path, toml).ok()?;
+
+        let child = Command::new(&binary)
+            .arg("--config")
+            .arg(&config_path)
+            .arg("--log-level")
+            .arg("warn")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .ok()?;
+
+        let mut server = Self {
+            child,
+            tcp_addr: tcp_addr.clone(),
+            _data_dir: data_dir,
+            _config_dir: config_dir,
+        };
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if tokio::time::Instant::now() > deadline {
+                eprintln!("cipher remote server failed to start within 10s");
+                return None;
+            }
+            if let Some(status) = server.child.try_wait().ok().flatten() {
+                eprintln!("cipher remote server exited during startup: {status}");
+                return None;
+            }
+            if let Ok(mut client) = shroudb_cipher_client::CipherClient::connect(&tcp_addr).await
+                && client.health().await.is_ok()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        Some(server)
+    }
+
     pub async fn start_with_config(config: TestServerConfig) -> Option<Self> {
         let binary = find_binary()?;
         let tcp_port = free_port();
@@ -118,6 +168,108 @@ impl Drop for TestServer {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// A ShrouDB core server used as a remote store backend.
+pub struct ShrouDBServer {
+    child: Child,
+    pub tcp_addr: String,
+    _data_dir: tempfile::TempDir,
+    _config_dir: tempfile::TempDir,
+}
+
+impl ShrouDBServer {
+    pub async fn start() -> Option<Self> {
+        let binary = find_shroudb_binary()?;
+        let tcp_port = free_port();
+        let tcp_addr = format!("127.0.0.1:{tcp_port}");
+        let data_dir = tempfile::tempdir().ok()?;
+        let config_dir = tempfile::tempdir().ok()?;
+
+        let config_path = config_dir.path().join("config.toml");
+        let toml = format!(
+            r#"[server]
+bind = "{tcp_addr}"
+
+[storage]
+data_dir = "{data_dir}"
+"#,
+            data_dir = data_dir.path().display()
+        );
+        std::fs::write(&config_path, toml).ok()?;
+
+        let child = Command::new(&binary)
+            .arg("--config")
+            .arg(&config_path)
+            .arg("--log-level")
+            .arg("warn")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .ok()?;
+
+        let mut server = Self {
+            child,
+            tcp_addr: tcp_addr.clone(),
+            _data_dir: data_dir,
+            _config_dir: config_dir,
+        };
+
+        // Wait for health
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if tokio::time::Instant::now() > deadline {
+                eprintln!("shroudb server failed to start within 10s");
+                return None;
+            }
+            if let Some(status) = server.child.try_wait().ok().flatten() {
+                eprintln!("shroudb server exited during startup: {status}");
+                return None;
+            }
+            if let Ok(mut client) = shroudb_cipher_client::CipherClient::connect(&tcp_addr).await {
+                // Use raw PING via health-like check
+                if client.health().await.is_ok() {
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        Some(server)
+    }
+
+    pub fn uri(&self) -> String {
+        format!("shroudb://{}", self.tcp_addr)
+    }
+}
+
+impl Drop for ShrouDBServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn find_shroudb_binary() -> Option<PathBuf> {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    // Look in the shroudb core repo's target directory
+    let candidates = [
+        PathBuf::from(manifest_dir).join("../../shroudb/target/debug/shroudb"),
+        PathBuf::from(manifest_dir).join("../../shroudb/target/release/shroudb"),
+    ];
+    candidates.into_iter().find(|p| p.exists())
+}
+
+fn generate_remote_config(tcp_bind: &str, remote_uri: &str) -> String {
+    format!(
+        r#"[server]
+tcp_bind = "{tcp_bind}"
+
+[store]
+mode = "remote"
+uri = "{remote_uri}"
+"#,
+    )
 }
 
 fn generate_config(tcp_bind: &str, config: &TestServerConfig) -> String {

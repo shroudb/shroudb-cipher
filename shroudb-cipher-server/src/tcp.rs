@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -9,13 +10,14 @@ use shroudb_cipher_protocol::dispatch::dispatch;
 use shroudb_cipher_protocol::response::CipherResponse;
 use shroudb_protocol_wire::Resp3Frame;
 use shroudb_server_tcp::ServerProtocol;
+use shroudb_store::Store;
 
-pub struct CipherProtocol;
+pub struct CipherProtocol<S>(PhantomData<S>);
 
-impl ServerProtocol for CipherProtocol {
+impl<S: Store + 'static> ServerProtocol for CipherProtocol<S> {
     type Command = CipherCommand;
     type Response = CipherResponse;
-    type Engine = CipherEngine<shroudb_storage::EmbeddedStore>;
+    type Engine = CipherEngine<S>;
 
     fn engine_name(&self) -> &str {
         "cipher"
@@ -65,9 +67,9 @@ impl ServerProtocol for CipherProtocol {
     }
 }
 
-pub async fn run_tcp(
+pub async fn run_tcp<S: Store + 'static>(
     listener: tokio::net::TcpListener,
-    engine: Arc<CipherEngine<shroudb_storage::EmbeddedStore>>,
+    engine: Arc<CipherEngine<S>>,
     token_validator: Option<Arc<dyn TokenValidator>>,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
@@ -75,7 +77,7 @@ pub async fn run_tcp(
     shroudb_server_tcp::run_tcp_tls(
         listener,
         engine,
-        Arc::new(CipherProtocol),
+        Arc::new(CipherProtocol::<S>(PhantomData)),
         token_validator,
         shutdown_rx,
         tls_acceptor,

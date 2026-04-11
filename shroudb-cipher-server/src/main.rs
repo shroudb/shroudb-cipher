@@ -9,8 +9,9 @@ use shroudb_cipher_core::keyring::KeyringAlgorithm;
 use shroudb_cipher_engine::engine::{CipherConfig, CipherEngine};
 use shroudb_cipher_engine::keyring_manager::KeyringCreateOpts;
 use shroudb_cipher_engine::scheduler;
+use shroudb_store::Store;
 
-use crate::config::load_config;
+use crate::config::{CipherServerConfig, load_config};
 
 #[derive(Parser)]
 #[command(
@@ -63,20 +64,38 @@ async fn main() -> anyhow::Result<()> {
         cfg.server.tcp_bind = bind.parse().context("invalid TCP bind address")?;
     }
 
-    // Store mode validation
-    if cfg.store.mode == "remote" {
-        anyhow::bail!(
-            "remote store mode not yet implemented (uri: {:?})",
-            cfg.store.uri
-        );
+    // Store: embedded or remote
+    match cfg.store.mode.as_str() {
+        "embedded" => {
+            let storage =
+                shroudb_server_bootstrap::open_storage(&cfg.store.data_dir, key_source.as_ref())
+                    .await
+                    .context("failed to open storage engine")?;
+            let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "cipher"));
+            run_server(cfg, store).await
+        }
+        "remote" => {
+            let uri = cfg
+                .store
+                .uri
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("remote mode requires store.uri"))?;
+            tracing::info!(uri, "connecting to remote store");
+            let store = Arc::new(
+                shroudb_client::RemoteStore::connect(uri)
+                    .await
+                    .context("failed to connect to remote store")?,
+            );
+            run_server(cfg, store).await
+        }
+        other => anyhow::bail!("unknown store mode: {other}"),
     }
+}
 
-    // Storage engine
-    let storage = shroudb_server_bootstrap::open_storage(&cfg.store.data_dir, key_source.as_ref())
-        .await
-        .context("failed to open storage engine")?;
-    let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "cipher"));
-
+async fn run_server<S: Store + 'static>(
+    cfg: CipherServerConfig,
+    store: Arc<S>,
+) -> anyhow::Result<()> {
     // Cipher engine
     let cipher_config = CipherConfig {
         default_rotation_days: cfg.engine.default_rotation_days,
