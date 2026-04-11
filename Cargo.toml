@@ -12,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.4.13"
+version = "1.4.14"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -20,13 +20,14 @@ publish = ["shroudb"]
 
 [workspace.dependencies]
 # Internal crates
-shroudb-cipher-core = { path = "shroudb-cipher-core", version = "1.4.4", registry = "shroudb", default-features = false }
-shroudb-cipher-engine = { path = "shroudb-cipher-engine", version = "1.4.4", registry = "shroudb" }
-shroudb-cipher-protocol = { path = "shroudb-cipher-protocol", version = "1.4.4", registry = "shroudb" }
-shroudb-cipher-client = { path = "shroudb-cipher-client", version = "1.4.4", registry = "shroudb" }
-shroudb-cipher-blind = { path = "shroudb-cipher-blind", version = "1.4.4", registry = "shroudb" }
+shroudb-cipher-core = { path = "shroudb-cipher-core", version = "1.4.14", registry = "shroudb", default-features = false }
+shroudb-cipher-engine = { path = "shroudb-cipher-engine", version = "1.4.14", registry = "shroudb" }
+shroudb-cipher-protocol = { path = "shroudb-cipher-protocol", version = "1.4.14", registry = "shroudb" }
+shroudb-cipher-client = { path = "shroudb-cipher-client", version = "1.4.14", registry = "shroudb" }
+shroudb-cipher-blind = { path = "shroudb-cipher-blind", version = "1.4.14", registry = "shroudb" }
 
 # ShrouDB commons (shroudb registry)
+shroudb-client = { version = "1.0.5", registry = "shroudb" }
 shroudb-store = { version = "0.1.2", registry = "shroudb" }
 shroudb-storage = { version = "0.2.13", registry = "shroudb" }
 shroudb-acl = { version = "0.2.0", registry = "shroudb" }
