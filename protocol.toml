@@ -119,6 +119,7 @@ params = [
     { name = "convergent", type = "boolean", required = false, key = "CONVERGENT", description = "Enable convergent (deterministic) encryption" },
 ]
 response = [
+    { name = "status", type = "string", description = "ok" },
     { name = "keyring", type = "keyring", description = "Keyring name" },
     { name = "algorithm", type = "algorithm", description = "Algorithm" },
     { name = "active_version", type = "key_version", description = "Active key version" },
@@ -133,8 +134,9 @@ verb = "KEYRING"
 variant = "LIST"
 description = "List all keyring names"
 params = []
+response_shape = "array_of_strings"
 response = [
-    { name = "keyrings", type = "array", description = "List of keyring names" },
+    { name = "keyrings", type = "array", description = "Bare JSON array of keyring name strings" },
 ]
 
 [commands.encrypt]
@@ -148,6 +150,7 @@ params = [
     { name = "convergent", type = "boolean", required = false, key = "CONVERGENT", description = "Opt-in to deterministic encryption (keyring must have convergent=true, CONTEXT required)" },
 ]
 response = [
+    { name = "status", type = "string", description = "ok" },
     { name = "ciphertext", type = "ciphertext", description = "Encrypted data with embedded key version" },
     { name = "key_version", type = "key_version", description = "Key version used for encryption" },
 ]
@@ -166,6 +169,7 @@ params = [
     { name = "context", type = "string", required = false, key = "CONTEXT", description = "AAD used during encryption" },
 ]
 response = [
+    { name = "status", type = "string", description = "ok" },
     { name = "plaintext", type = "plaintext", description = "Decrypted data" },
 ]
 errors = [
@@ -183,6 +187,7 @@ params = [
     { name = "context", type = "string", required = false, key = "CONTEXT", description = "AAD" },
 ]
 response = [
+    { name = "status", type = "string", description = "ok" },
     { name = "ciphertext", type = "ciphertext", description = "Re-encrypted ciphertext with new key version" },
     { name = "key_version", type = "key_version", description = "New key version used" },
 ]
@@ -199,6 +204,7 @@ params = [
     { name = "bits", type = "integer", required = false, key = "BITS", description = "Key size in bits: 128, 256, or 512 (default: 256)" },
 ]
 response = [
+    { name = "status", type = "string", description = "ok" },
     { name = "plaintext_key", type = "plaintext", description = "Plaintext DEK (use for local encryption, then discard)" },
     { name = "wrapped_key", type = "ciphertext", description = "Wrapped DEK (store alongside ciphertext, unwrap via DECRYPT)" },
     { name = "key_version", type = "key_version", description = "Key version used to wrap" },
@@ -216,6 +222,7 @@ params = [
     { name = "data", type = "plaintext", required = true, position = 2, description = "Base64-encoded data to sign" },
 ]
 response = [
+    { name = "status", type = "string", description = "ok" },
     { name = "signature", type = "signature", description = "Hex-encoded detached signature" },
     { name = "key_version", type = "key_version", description = "Key version used" },
 ]
@@ -233,6 +240,7 @@ params = [
     { name = "signature", type = "signature", required = true, position = 3, description = "Hex-encoded signature to verify" },
 ]
 response = [
+    { name = "status", type = "string", description = "ok" },
     { name = "valid", type = "boolean", description = "Whether the signature is valid" },
 ]
 errors = [
@@ -249,6 +257,7 @@ params = [
     { name = "dryrun", type = "boolean", required = false, key = "DRYRUN", description = "Preview rotation without applying" },
 ]
 response = [
+    { name = "status", type = "string", description = "ok" },
     { name = "rotated", type = "boolean", description = "Whether rotation occurred" },
     { name = "key_version", type = "key_version", description = "Active key version after operation" },
     { name = "previous_version", type = "key_version", description = "Previous active key version", optional = true },
@@ -298,8 +307,9 @@ errors = [
 verb = "PING"
 description = "Simple connectivity check — returns PONG"
 params = []
+response_shape = "bare_string"
 response = [
-    { name = "message", type = "string", description = "Always PONG" },
+    { name = "pong", type = "string", description = "Always the bare string \"PONG\" (not wrapped in an object)" },
 ]
 
 [commands.command_list]
