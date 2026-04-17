@@ -3,6 +3,7 @@ use base64::engine::general_purpose::STANDARD;
 use shroudb_acl::AuthContext;
 use shroudb_cipher_core::keyring::KeyringAlgorithm;
 use shroudb_cipher_engine::engine::CipherEngine;
+use shroudb_protocol_wire::WIRE_PROTOCOL;
 use shroudb_store::Store;
 
 use crate::commands::CipherCommand;
@@ -23,6 +24,7 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "HEALTH",
     "PING",
     "COMMAND LIST",
+    "HELLO",
 ];
 
 /// Dispatch a parsed command to the CipherEngine and produce a response.
@@ -203,6 +205,14 @@ pub async fn dispatch<S: Store>(
         CipherCommand::CommandList => CipherResponse::ok(serde_json::json!({
             "count": SUPPORTED_COMMANDS.len(),
             "commands": SUPPORTED_COMMANDS,
+        })),
+
+        CipherCommand::Hello => CipherResponse::ok(serde_json::json!({
+            "engine": "cipher",
+            "version": env!("CARGO_PKG_VERSION"),
+            "protocol": WIRE_PROTOCOL,
+            "commands": SUPPORTED_COMMANDS,
+            "capabilities": Vec::<&str>::new(),
         })),
     }
 }

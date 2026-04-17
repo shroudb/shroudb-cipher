@@ -321,3 +321,15 @@ response = [
     { name = "count", type = "integer", description = "Number of supported commands" },
     { name = "commands", type = "array", description = "List of command verb strings" },
 ]
+
+[commands.hello]
+verb = "HELLO"
+description = "Engine identity handshake — returns engine name, version, wire protocol, supported commands, and capability tags. Pre-auth; clients issue this on connect to verify they are talking to the expected engine and version."
+params = []
+response = [
+    { name = "engine", type = "string", description = "Canonical engine name (e.g., \"cipher\")" },
+    { name = "version", type = "string", description = "Engine's semantic version" },
+    { name = "protocol", type = "string", description = "Wire protocol identifier (e.g., \"RESP3/1\")" },
+    { name = "commands", type = "array", description = "Supported command surface (uppercase, subcommands space-separated)" },
+    { name = "capabilities", type = "array", description = "Cross-cutting capability tags; may be empty" },
+]

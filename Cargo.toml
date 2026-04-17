@@ -33,8 +33,8 @@ shroudb-storage = { version = "0.3.0", registry = "shroudb" }
 shroudb-acl = { version = "0.2.0", registry = "shroudb" }
 shroudb-crypto = { version = "0.1.4", registry = "shroudb", default-features = false }
 shroudb-chronicle-core = { version = "1.5.0", registry = "shroudb" }
-shroudb-protocol-wire = { version = "0.1.0", registry = "shroudb" }
-shroudb-server-tcp = { version = "0.2.1", registry = "shroudb" }
+shroudb-protocol-wire = { version = "0.2.0", registry = "shroudb" }
+shroudb-server-tcp = { version = "0.2.2", registry = "shroudb" }
 shroudb-server-bootstrap = { version = "0.1.2", registry = "shroudb" }
 shroudb-client-common = { version = "0.2.0", registry = "shroudb" }
 shroudb-courier-core = { version = "1.3.4", registry = "shroudb" }
@@ -71,3 +71,4 @@ uuid = { version = "1", features = ["v4"] }
 hex = "0.4"
 base64 = "0.22"
 dashmap = "6"
+

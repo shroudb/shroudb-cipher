@@ -66,6 +66,11 @@ pub enum CipherCommand {
     Health,
     Ping,
     CommandList,
+    /// Engine identity handshake. Pre-auth; returns engine name, version,
+    /// wire protocol, supported commands, and capability tags so a client
+    /// can detect SDK/engine version mismatches before issuing any real
+    /// command.
+    Hello,
 }
 
 impl CipherCommand {
@@ -76,7 +81,8 @@ impl CipherCommand {
             CipherCommand::Auth { .. }
             | CipherCommand::Health
             | CipherCommand::Ping
-            | CipherCommand::CommandList => AclRequirement::None,
+            | CipherCommand::CommandList
+            | CipherCommand::Hello => AclRequirement::None,
 
             // Listing keyring names is not sensitive
             CipherCommand::KeyringList => AclRequirement::None,
@@ -135,6 +141,7 @@ pub fn parse_command(args: &[&str]) -> Result<CipherCommand, String> {
         "HEALTH" => Ok(CipherCommand::Health),
         "PING" => Ok(CipherCommand::Ping),
         "COMMAND" => Ok(CipherCommand::CommandList),
+        "HELLO" => Ok(CipherCommand::Hello),
         _ => Err(format!("unknown command: {}", args[0])),
     }
 }
@@ -420,6 +427,12 @@ mod tests {
     fn parse_ping() {
         let cmd = parse_command(&["PING"]).unwrap();
         assert!(matches!(cmd, CipherCommand::Ping));
+    }
+
+    #[test]
+    fn parse_hello() {
+        let cmd = parse_command(&["HELLO"]).unwrap();
+        assert!(matches!(cmd, CipherCommand::Hello));
     }
 
     #[test]
