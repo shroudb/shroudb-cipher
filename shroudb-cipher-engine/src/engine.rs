@@ -209,14 +209,9 @@ impl<S: Store> CipherEngine<S> {
         Ok(())
     }
 
-    /// Emit an audit event to Chronicle. If chronicle is not configured, this
-    /// is a no-op. If chronicle is configured but unreachable, returns an error
-    /// so security-critical callers can fail closed.
-    ///
-    /// Every call threads `start: Instant` so Chronicle receives the real
-    /// wall-clock duration of the audited operation, and `metadata` so the
-    /// entry carries enough context (algorithm, key_version, …) to be
-    /// useful on its own — not an empty skeleton.
+    /// Emit a successful audit event to Chronicle. Thin wrapper around
+    /// `emit_audit_event_result` that pins `EventResult::Ok` so control-plane
+    /// callers don't re-state it on every call site.
     async fn emit_audit_event(
         &self,
         operation: &str,
@@ -224,6 +219,28 @@ impl<S: Store> CipherEngine<S> {
         actor: &str,
         start: Instant,
         metadata: HashMap<String, String>,
+    ) -> Result<(), CipherError> {
+        self.emit_audit_event_result(operation, resource, actor, start, metadata, EventResult::Ok)
+            .await
+    }
+
+    /// Emit an audit event with an explicit result to Chronicle. If chronicle
+    /// is not configured, this is a no-op. If chronicle is configured but
+    /// unreachable, returns an error so security-critical callers can fail
+    /// closed.
+    ///
+    /// Every call threads `start: Instant` so Chronicle receives the real
+    /// wall-clock duration of the audited operation, and `metadata` so the
+    /// entry carries enough context (algorithm, key_version, error_kind …)
+    /// to be useful on its own — not an empty skeleton.
+    async fn emit_audit_event_result(
+        &self,
+        operation: &str,
+        resource: &str,
+        actor: &str,
+        start: Instant,
+        metadata: HashMap<String, String>,
+        result: EventResult,
     ) -> Result<(), CipherError> {
         let Some(chronicle) = self.chronicle.as_ref() else {
             return Ok(());
@@ -233,7 +250,7 @@ impl<S: Store> CipherEngine<S> {
             operation.to_string(),
             "keyring".to_string(),
             resource.to_string(),
-            EventResult::Ok,
+            result,
             actor.to_string(),
         );
         // Floor at 1ms: ops that complete in less than a millisecond still
@@ -395,6 +412,41 @@ impl<S: Store> CipherEngine<S> {
         let start = Instant::now();
         // Sentry must evaluate every data-plane op, not just control plane.
         self.check_policy(keyring_name, "decrypt", None).await?;
+        let outcome = self.decrypt_inner(keyring_name, ciphertext, context).await;
+        // Every completion path — success or failure — must leave a trail:
+        // otherwise an attacker probing ciphertexts with wrong AAD would be
+        // invisible to Chronicle. Build metadata from whatever we know,
+        // flip EventResult on error, and emit before returning.
+        let (result, metadata) = match &outcome {
+            Ok((_, meta)) => (EventResult::Ok, meta.clone()),
+            Err(e) => {
+                let mut meta = HashMap::new();
+                meta.insert("error_kind".to_string(), event_error_kind(e).to_string());
+                meta.insert("error".to_string(), e.to_string());
+                (EventResult::Error, meta)
+            }
+        };
+        let _ = self
+            .emit_audit_event_result(
+                "decrypt",
+                keyring_name,
+                AUDIT_ANONYMOUS,
+                start,
+                metadata,
+                result,
+            )
+            .await;
+        outcome.map(|(plaintext, _)| DecryptResult {
+            plaintext: plaintext.into(),
+        })
+    }
+
+    async fn decrypt_inner(
+        &self,
+        keyring_name: &str,
+        ciphertext: &str,
+        context: Option<&str>,
+    ) -> Result<(Vec<u8>, HashMap<String, String>), CipherError> {
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Decrypt)?;
@@ -427,12 +479,7 @@ impl<S: Store> CipherEngine<S> {
             keyring.algorithm.wire_name().to_string(),
         );
         metadata.insert("key_version".to_string(), kv.version.to_string());
-        let _ = self
-            .emit_audit_event("decrypt", keyring_name, AUDIT_ANONYMOUS, start, metadata)
-            .await;
-        Ok(DecryptResult {
-            plaintext: plaintext.into(),
-        })
+        Ok((plaintext, metadata))
     }
 
     // ── Rewrap ─────────────────────────────────────────────────────
@@ -862,6 +909,31 @@ fn unix_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// Classify a `CipherError` into a short, stable `error_kind` token suitable
+/// for `Event.metadata`. Dashboards and alerting rules key off this rather
+/// than the human-readable message (which embeds caller-supplied strings).
+fn event_error_kind(err: &CipherError) -> &'static str {
+    match err {
+        CipherError::InvalidStateTransition { .. } => "invalid_state_transition",
+        CipherError::KeyringNotFound(_) => "keyring_not_found",
+        CipherError::KeyringExists(_) => "keyring_exists",
+        CipherError::KeyVersionNotFound { .. } => "key_version_not_found",
+        CipherError::KeyVersionRetired { .. } => "key_version_retired",
+        CipherError::NoActiveKey(_) => "no_active_key",
+        CipherError::InvalidCiphertext(_) => "invalid_ciphertext",
+        CipherError::DecryptionFailed(_) => "decryption_failed",
+        CipherError::AlgorithmMismatch { .. } => "algorithm_mismatch",
+        CipherError::Disabled(_) => "keyring_disabled",
+        CipherError::PolicyDenied { .. } => "policy_denied",
+        CipherError::InvalidArgument(_) => "invalid_argument",
+        CipherError::ConvergentGuard => "convergent_guard",
+        CipherError::Crypto(_) => "crypto",
+        CipherError::Store(_) => "store",
+        CipherError::Internal(_) => "internal",
+        CipherError::AbacDenied { .. } => "abac_denied",
+    }
 }
 
 use shroudb_cipher_core::key_version::KeyVersion;

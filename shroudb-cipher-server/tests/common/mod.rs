@@ -268,6 +268,14 @@ tcp_bind = "{tcp_bind}"
 [store]
 mode = "remote"
 uri = "{remote_uri}"
+
+[audit]
+mode = "disabled"
+justification = "integration tests do not run a Chronicle process"
+
+[policy]
+mode = "disabled"
+justification = "integration tests cover the cipher surface, not Sentry policy"
 "#,
     )
 }
@@ -279,6 +287,14 @@ tcp_bind = "{tcp_bind}"
 
 [store]
 mode = "embedded"
+
+[audit]
+mode = "disabled"
+justification = "integration tests do not run a Chronicle process"
+
+[policy]
+mode = "disabled"
+justification = "integration tests cover the cipher surface, not Sentry policy"
 "#
     );
 
