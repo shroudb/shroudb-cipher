@@ -23,4 +23,4 @@ Rules:
 - [x] **DEBT-F-cipher-4** — `PolicyPrincipal.id` must not be empty (`actor.unwrap_or("")`). Test: `debt_fcipher_4_policy_principal_must_not_be_empty` @ same file.
 - [x] **DEBT-F-cipher-5** — audit `actor` must not be empty string on data-plane events. Test: `debt_fcipher_5_audit_actor_must_not_be_empty_for_data_plane` @ same file.
 - [x] **DEBT-F-cipher-6** — failed `decrypt` must emit audit with `result: Error` (currently `let _ =` swallows). Test: `debt_fcipher_6_failure_decrypt_must_emit_error_audit` @ same file.
-- [ ] **DEBT-F-cipher-7** — `CipherServerConfig` must accept `[sentry]` / `[chronicle]` sections. Test: `debt_fcipher_7_server_config_must_wire_sentry_and_chronicle` @ `shroudb-cipher-server/src/config.rs`.
+- [x] **DEBT-F-cipher-7** — `CipherServerConfig` must accept `[audit]` / `[policy]` sections (engine-bootstrap resolves them to `Capability<T>`). Test: `cipher_server_config_wires_audit_and_policy_sections` @ `shroudb-cipher-server/src/config.rs`.
