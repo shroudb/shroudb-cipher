@@ -161,11 +161,26 @@ impl<S: Store> CipherEngine<S> {
         let Some(evaluator) = self.policy_evaluator.as_ref() else {
             return Ok(());
         };
+        // A `PolicyPrincipal` with an empty `id` makes Sentry evaluate every
+        // policy against "nobody" — distinct callers look identical and
+        // `sub`-bound rules trivially match. Callers without an auth context
+        // are mapped to the `"anonymous"` sentinel and tagged via an
+        // `unauthenticated` claim so policy authors can explicitly allow or
+        // deny that surface instead of it sneaking past an empty-string hole.
+        let (principal_id, unauthenticated) = match actor {
+            Some(a) if !a.is_empty() => (a.to_string(), false),
+            _ => ("anonymous".to_string(), true),
+        };
+        let mut claims = std::collections::HashMap::new();
+        claims.insert("sub".to_string(), principal_id.clone());
+        if unauthenticated {
+            claims.insert("unauthenticated".to_string(), "true".to_string());
+        }
         let request = PolicyRequest {
             principal: PolicyPrincipal {
-                id: actor.unwrap_or("").to_string(),
+                id: principal_id,
                 roles: vec![],
-                claims: Default::default(),
+                claims,
             },
             resource: PolicyResource {
                 id: resource_id.to_string(),
