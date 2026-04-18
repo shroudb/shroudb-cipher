@@ -22,6 +22,12 @@ use crate::keyring_manager::{
     KeyringCreateOpts, KeyringManager, find_active_key, find_key_version,
 };
 
+/// Sentinel actor used in audit events when the caller arrives without an
+/// auth context. An empty-string actor is a logging footgun: it silently
+/// coalesces every anonymous call into "unknown origin" with no hint that
+/// attribution was missing at the source.
+const AUDIT_ANONYMOUS: &str = "anonymous";
+
 /// Configuration for the Cipher engine.
 pub struct CipherConfig {
     pub default_rotation_days: u32,
@@ -272,8 +278,14 @@ impl<S: Store> CipherEngine<S> {
         let mut metadata = HashMap::new();
         metadata.insert("algorithm".to_string(), algorithm.wire_name().to_string());
         metadata.insert("convergent".to_string(), convergent.to_string());
-        self.emit_audit_event("keyring_create", name, actor.unwrap_or(""), start, metadata)
-            .await?;
+        self.emit_audit_event(
+            "keyring_create",
+            name,
+            actor.unwrap_or(AUDIT_ANONYMOUS),
+            start,
+            metadata,
+        )
+        .await?;
         Ok(build_key_info(&kr))
     }
 
@@ -367,7 +379,7 @@ impl<S: Store> CipherEngine<S> {
         );
         metadata.insert("key_version".to_string(), kv.version.to_string());
         metadata.insert("convergent".to_string(), convergent.to_string());
-        self.emit_audit_event("encrypt", keyring_name, "", start, metadata)
+        self.emit_audit_event("encrypt", keyring_name, AUDIT_ANONYMOUS, start, metadata)
             .await?;
         Ok(result)
     }
@@ -416,7 +428,7 @@ impl<S: Store> CipherEngine<S> {
         );
         metadata.insert("key_version".to_string(), kv.version.to_string());
         let _ = self
-            .emit_audit_event("decrypt", keyring_name, "", start, metadata)
+            .emit_audit_event("decrypt", keyring_name, AUDIT_ANONYMOUS, start, metadata)
             .await;
         Ok(DecryptResult {
             plaintext: plaintext.into(),
@@ -582,7 +594,7 @@ impl<S: Store> CipherEngine<S> {
             keyring.algorithm.wire_name().to_string(),
         );
         metadata.insert("key_version".to_string(), active_kv.version.to_string());
-        self.emit_audit_event("sign", keyring_name, "", start, metadata)
+        self.emit_audit_event("sign", keyring_name, AUDIT_ANONYMOUS, start, metadata)
             .await?;
         Ok(result)
     }
@@ -752,8 +764,14 @@ impl<S: Store> CipherEngine<S> {
         metadata.insert("new_version".to_string(), new_active.version.to_string());
         metadata.insert("previous_version".to_string(), prev_version.to_string());
         metadata.insert("forced".to_string(), force.to_string());
-        self.emit_audit_event("rotate", keyring_name, actor.unwrap_or(""), start, metadata)
-            .await?;
+        self.emit_audit_event(
+            "rotate",
+            keyring_name,
+            actor.unwrap_or(AUDIT_ANONYMOUS),
+            start,
+            metadata,
+        )
+        .await?;
 
         Ok(RotateResult {
             key_version: new_active.version,

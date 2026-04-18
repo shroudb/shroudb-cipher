@@ -21,6 +21,6 @@ Rules:
 - [x] **DEBT-F-cipher-2** — audit events must carry duration, correlation_id, tenant_id, and real metadata (not Default::default()). Test: `debt_fcipher_2_audit_event_must_carry_timing_and_context` @ same file.
 - [x] **DEBT-F-cipher-3** — data-plane ops must call `check_policy`. Test: `debt_fcipher_3_data_plane_must_call_sentry` @ same file. (encrypt/decrypt/sign now call Sentry; rewrap/generate_data_key/verify_signature remain sync-fn due to cross-repo signature constraints — flagged in TODOS for follow-up.)
 - [x] **DEBT-F-cipher-4** — `PolicyPrincipal.id` must not be empty (`actor.unwrap_or("")`). Test: `debt_fcipher_4_policy_principal_must_not_be_empty` @ same file.
-- [ ] **DEBT-F-cipher-5** — audit `actor` must not be empty string on data-plane events. Test: `debt_fcipher_5_audit_actor_must_not_be_empty_for_data_plane` @ same file.
+- [x] **DEBT-F-cipher-5** — audit `actor` must not be empty string on data-plane events. Test: `debt_fcipher_5_audit_actor_must_not_be_empty_for_data_plane` @ same file.
 - [ ] **DEBT-F-cipher-6** — failed `decrypt` must emit audit with `result: Error` (currently `let _ =` swallows). Test: `debt_fcipher_6_failure_decrypt_must_emit_error_audit` @ same file.
 - [ ] **DEBT-F-cipher-7** — `CipherServerConfig` must accept `[sentry]` / `[chronicle]` sections. Test: `debt_fcipher_7_server_config_must_wire_sentry_and_chronicle` @ `shroudb-cipher-server/src/config.rs`.
