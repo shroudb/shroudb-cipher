@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -190,16 +191,23 @@ impl<S: Store> CipherEngine<S> {
     /// Emit an audit event to Chronicle. If chronicle is not configured, this
     /// is a no-op. If chronicle is configured but unreachable, returns an error
     /// so security-critical callers can fail closed.
+    ///
+    /// Every call threads `start: Instant` so Chronicle receives the real
+    /// wall-clock duration of the audited operation, and `metadata` so the
+    /// entry carries enough context (algorithm, key_version, …) to be
+    /// useful on its own — not an empty skeleton.
     async fn emit_audit_event(
         &self,
         operation: &str,
         resource: &str,
         actor: &str,
+        start: Instant,
+        metadata: HashMap<String, String>,
     ) -> Result<(), CipherError> {
         let Some(chronicle) = self.chronicle.as_ref() else {
             return Ok(());
         };
-        let event = Event::new(
+        let mut event = Event::new(
             ChronicleEngine::Cipher,
             operation.to_string(),
             "keyring".to_string(),
@@ -207,6 +215,12 @@ impl<S: Store> CipherEngine<S> {
             EventResult::Ok,
             actor.to_string(),
         );
+        // Floor at 1ms: ops that complete in less than a millisecond still
+        // produced a measurable event, and a literal `0` is indistinguishable
+        // from "never timed" in dashboards that filter on duration.
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        event.duration_ms = elapsed_ms.max(1);
+        event.metadata = metadata;
         chronicle
             .record(event)
             .await
@@ -225,6 +239,7 @@ impl<S: Store> CipherEngine<S> {
         convergent: bool,
         actor: Option<&str>,
     ) -> Result<KeyInfoResult, CipherError> {
+        let start = Instant::now();
         self.check_policy(name, "keyring_create", actor).await?;
         let kr = self
             .keyrings
@@ -239,7 +254,10 @@ impl<S: Store> CipherEngine<S> {
                 },
             )
             .await?;
-        self.emit_audit_event("keyring_create", name, actor.unwrap_or(""))
+        let mut metadata = HashMap::new();
+        metadata.insert("algorithm".to_string(), algorithm.wire_name().to_string());
+        metadata.insert("convergent".to_string(), convergent.to_string());
+        self.emit_audit_event("keyring_create", name, actor.unwrap_or(""), start, metadata)
             .await?;
         Ok(build_key_info(&kr))
     }
@@ -258,6 +276,7 @@ impl<S: Store> CipherEngine<S> {
         key_version: Option<u32>,
         convergent: bool,
     ) -> Result<EncryptResult, CipherError> {
+        let start = Instant::now();
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Encrypt)?;
@@ -324,7 +343,15 @@ impl<S: Store> CipherEngine<S> {
             ciphertext: envelope.encode()?,
             key_version: kv.version,
         };
-        self.emit_audit_event("encrypt", keyring_name, "").await?;
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "algorithm".to_string(),
+            keyring.algorithm.wire_name().to_string(),
+        );
+        metadata.insert("key_version".to_string(), kv.version.to_string());
+        metadata.insert("convergent".to_string(), convergent.to_string());
+        self.emit_audit_event("encrypt", keyring_name, "", start, metadata)
+            .await?;
         Ok(result)
     }
 
@@ -336,6 +363,7 @@ impl<S: Store> CipherEngine<S> {
         ciphertext: &str,
         context: Option<&str>,
     ) -> Result<DecryptResult, CipherError> {
+        let start = Instant::now();
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Decrypt)?;
@@ -362,7 +390,15 @@ impl<S: Store> CipherEngine<S> {
             aad,
         )?;
 
-        let _ = self.emit_audit_event("decrypt", keyring_name, "").await;
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "algorithm".to_string(),
+            keyring.algorithm.wire_name().to_string(),
+        );
+        metadata.insert("key_version".to_string(), kv.version.to_string());
+        let _ = self
+            .emit_audit_event("decrypt", keyring_name, "", start, metadata)
+            .await;
         Ok(DecryptResult {
             plaintext: plaintext.into(),
         })
@@ -493,6 +529,7 @@ impl<S: Store> CipherEngine<S> {
         keyring_name: &str,
         data_b64: &str,
     ) -> Result<SignResult, CipherError> {
+        let start = Instant::now();
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Sign)?;
@@ -518,7 +555,14 @@ impl<S: Store> CipherEngine<S> {
             signature: signature.into(),
             key_version: active_kv.version,
         };
-        self.emit_audit_event("sign", keyring_name, "").await?;
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "algorithm".to_string(),
+            keyring.algorithm.wire_name().to_string(),
+        );
+        metadata.insert("key_version".to_string(), active_kv.version.to_string());
+        self.emit_audit_event("sign", keyring_name, "", start, metadata)
+            .await?;
         Ok(result)
     }
 
@@ -602,6 +646,7 @@ impl<S: Store> CipherEngine<S> {
         dryrun: bool,
         actor: Option<&str>,
     ) -> Result<RotateResult, CipherError> {
+        let start = Instant::now();
         self.check_policy(keyring_name, "rotate", actor).await?;
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
@@ -681,7 +726,12 @@ impl<S: Store> CipherEngine<S> {
             "keyring rotated"
         );
 
-        self.emit_audit_event("rotate", keyring_name, actor.unwrap_or(""))
+        let mut metadata = HashMap::new();
+        metadata.insert("algorithm".to_string(), algorithm.wire_name().to_string());
+        metadata.insert("new_version".to_string(), new_active.version.to_string());
+        metadata.insert("previous_version".to_string(), prev_version.to_string());
+        metadata.insert("forced".to_string(), force.to_string());
+        self.emit_audit_event("rotate", keyring_name, actor.unwrap_or(""), start, metadata)
             .await?;
 
         Ok(RotateResult {
