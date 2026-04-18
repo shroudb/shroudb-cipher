@@ -277,6 +277,8 @@ impl<S: Store> CipherEngine<S> {
         convergent: bool,
     ) -> Result<EncryptResult, CipherError> {
         let start = Instant::now();
+        // Sentry must evaluate every data-plane op, not just control plane.
+        self.check_policy(keyring_name, "encrypt", None).await?;
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Encrypt)?;
@@ -364,6 +366,8 @@ impl<S: Store> CipherEngine<S> {
         context: Option<&str>,
     ) -> Result<DecryptResult, CipherError> {
         let start = Instant::now();
+        // Sentry must evaluate every data-plane op, not just control plane.
+        self.check_policy(keyring_name, "decrypt", None).await?;
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Decrypt)?;
@@ -530,6 +534,8 @@ impl<S: Store> CipherEngine<S> {
         data_b64: &str,
     ) -> Result<SignResult, CipherError> {
         let start = Instant::now();
+        // Sentry must evaluate every data-plane op, not just control plane.
+        self.check_policy(keyring_name, "sign", None).await?;
         let keyring = self.keyrings.get(keyring_name)?;
         check_disabled(&keyring)?;
         check_policy(&keyring, KeyringOperation::Sign)?;
