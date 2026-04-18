@@ -8,3 +8,6 @@ pub mod crypto_ops;
 pub mod engine;
 pub mod keyring_manager;
 pub mod scheduler;
+
+#[cfg(test)]
+mod test_support;

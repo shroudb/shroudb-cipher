@@ -224,10 +224,16 @@ mod tests {
     use shroudb_cipher_engine::engine::CipherConfig;
 
     async fn setup() -> CipherEngine<shroudb_storage::EmbeddedStore> {
+        use shroudb_server_bootstrap::Capability;
         let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
-        CipherEngine::new(store, CipherConfig::default(), None, None)
-            .await
-            .unwrap()
+        CipherEngine::new(
+            store,
+            CipherConfig::default(),
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]

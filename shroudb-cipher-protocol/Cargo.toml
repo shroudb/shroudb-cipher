@@ -24,3 +24,4 @@ hex.workspace = true
 tokio = { version = "1", features = ["full", "test-util"] }
 shroudb-storage = { workspace = true, features = ["testing"] }
 shroudb-crypto = { workspace = true, features = ["server"] }
+shroudb-server-bootstrap.workspace = true

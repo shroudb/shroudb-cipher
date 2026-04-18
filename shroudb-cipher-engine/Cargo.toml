@@ -12,8 +12,10 @@ shroudb-cipher-core = { workspace = true, features = ["server-crypto"] }
 shroudb-store.workspace = true
 shroudb-crypto = { workspace = true, features = ["server"] }
 shroudb-acl.workspace = true
+shroudb-audit.workspace = true
 shroudb-chronicle-core.workspace = true
 shroudb-courier-core.workspace = true
+shroudb-server-bootstrap.workspace = true
 
 ring.workspace = true
 tokio.workspace = true

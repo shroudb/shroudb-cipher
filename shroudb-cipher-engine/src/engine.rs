@@ -13,6 +13,7 @@ use shroudb_cipher_core::keyring::KeyringAlgorithm;
 use shroudb_cipher_core::policy::KeyringOperation;
 use shroudb_courier_core::ops::CourierOps;
 use shroudb_crypto::{SecretBytes, SensitiveBytes};
+use shroudb_server_bootstrap::Capability;
 use shroudb_store::Store;
 
 use crate::crypto_ops::{self, NonceMode};
@@ -89,18 +90,23 @@ pub struct KeyInfoResult {
 pub struct CipherEngine<S: Store> {
     pub(crate) keyrings: KeyringManager<S>,
     pub(crate) config: CipherConfig,
-    policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
-    chronicle: Option<Arc<dyn ChronicleOps>>,
-    courier: Option<Arc<dyn CourierOps>>,
+    policy_evaluator: Capability<Arc<dyn PolicyEvaluator>>,
+    chronicle: Capability<Arc<dyn ChronicleOps>>,
+    courier: Capability<Arc<dyn CourierOps>>,
 }
 
 impl<S: Store> CipherEngine<S> {
     /// Create a new Cipher engine.
+    ///
+    /// Every capability slot is explicit: `Capability::Enabled(...)`,
+    /// `Capability::DisabledForTests`, or
+    /// `Capability::DisabledWithJustification("<reason>")`. Absence is
+    /// never silent — operators must name why they're opting out.
     pub async fn new(
         store: Arc<S>,
         config: CipherConfig,
-        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
-        chronicle: Option<Arc<dyn ChronicleOps>>,
+        policy_evaluator: Capability<Arc<dyn PolicyEvaluator>>,
+        chronicle: Capability<Arc<dyn ChronicleOps>>,
     ) -> Result<Self, CipherError> {
         let keyrings = KeyringManager::new(store);
         keyrings.init().await?;
@@ -109,17 +115,20 @@ impl<S: Store> CipherEngine<S> {
             config,
             policy_evaluator,
             chronicle,
-            courier: None,
+            courier: Capability::disabled(
+                "courier rotation-notify not configured — use new_with_capabilities to wire it",
+            ),
         })
     }
 
-    /// Create a new Cipher engine with all capability traits.
+    /// Create a new Cipher engine with all capability traits, including
+    /// Courier for key-rotation notifications.
     pub async fn new_with_capabilities(
         store: Arc<S>,
         config: CipherConfig,
-        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
-        chronicle: Option<Arc<dyn ChronicleOps>>,
-        courier: Option<Arc<dyn CourierOps>>,
+        policy_evaluator: Capability<Arc<dyn PolicyEvaluator>>,
+        chronicle: Capability<Arc<dyn ChronicleOps>>,
+        courier: Capability<Arc<dyn CourierOps>>,
     ) -> Result<Self, CipherError> {
         let keyrings = KeyringManager::new(store);
         keyrings.init().await?;
@@ -137,13 +146,18 @@ impl<S: Store> CipherEngine<S> {
         self.courier.as_ref()
     }
 
+    /// Access the courier capability slot (including its disabled state).
+    pub fn courier_capability(&self) -> &Capability<Arc<dyn CourierOps>> {
+        &self.courier
+    }
+
     async fn check_policy(
         &self,
         resource_id: &str,
         action: &str,
         actor: Option<&str>,
     ) -> Result<(), CipherError> {
-        let Some(evaluator) = &self.policy_evaluator else {
+        let Some(evaluator) = self.policy_evaluator.as_ref() else {
             return Ok(());
         };
         let request = PolicyRequest {
@@ -182,7 +196,7 @@ impl<S: Store> CipherEngine<S> {
         resource: &str,
         actor: &str,
     ) -> Result<(), CipherError> {
-        let Some(chronicle) = &self.chronicle else {
+        let Some(chronicle) = self.chronicle.as_ref() else {
             return Ok(());
         };
         let event = Event::new(
@@ -770,9 +784,14 @@ mod tests {
 
     async fn setup() -> CipherEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("cipher-test").await;
-        CipherEngine::new(store, CipherConfig::default(), None, None)
-            .await
-            .unwrap()
+        CipherEngine::new(
+            store,
+            CipherConfig::default(),
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -1207,6 +1226,271 @@ mod tests {
                 enc.key_version
             );
         }
+    }
+
+    // ── DEBT TESTS ──────────────────────────────────────────────────
+    //
+    // Hard ratchet (AUDIT_2026-04-17). Prior ENGINE_REVIEW_*.md docs
+    // declared Cipher "production-ready" across 17 iterations. These
+    // tests catalog specific half-wired capability paths. Do NOT add
+    // #[ignore] — failures signal real security gaps.
+
+    use crate::test_support::{RecordingChronicle, RecordingSentry};
+
+    async fn engine_with_recorders() -> (
+        CipherEngine<shroudb_storage::EmbeddedStore>,
+        std::sync::Arc<std::sync::Mutex<Vec<shroudb_acl::PolicyRequest>>>,
+        std::sync::Arc<std::sync::Mutex<Vec<shroudb_chronicle_core::event::Event>>>,
+    ) {
+        let store = shroudb_storage::test_util::create_test_store("cipher-debt").await;
+        let (sentry, reqs) = RecordingSentry::new();
+        let (chronicle, events) = RecordingChronicle::new();
+        let engine = CipherEngine::new(
+            store,
+            CipherConfig::default(),
+            Capability::Enabled(sentry),
+            Capability::Enabled(chronicle),
+        )
+        .await
+        .expect("engine init");
+        (engine, reqs, events)
+    }
+
+    /// Former DEBT-Fcipher-1 (AUDIT_2026-04-17), now closed: `CipherEngine::new`
+    /// takes `Capability<Arc<dyn PolicyEvaluator>>` and
+    /// `Capability<Arc<dyn ChronicleOps>>` — the type system rejects the
+    /// previous `None, None` shape outright. Tests must pick an explicit
+    /// variant: `Capability::DisabledForTests` for unit harnesses,
+    /// `Capability::DisabledWithJustification(<reason>)` for documented
+    /// opt-outs, or `Capability::Enabled(...)` with a concrete impl.
+    /// Server mains (`shroudb-cipher-server/src/main.rs`) now dispatch
+    /// via `shroudb-engine-bootstrap` `AuditConfig::resolve` and
+    /// `PolicyConfig::resolve`.
+    #[tokio::test]
+    async fn cipher_engine_new_requires_explicit_capability_variants() {
+        let store = shroudb_storage::test_util::create_test_store("cipher-explicit-caps").await;
+        // The valid call — every other shape is a type error.
+        let result = CipherEngine::new(
+            store,
+            CipherConfig::default(),
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+        )
+        .await;
+        assert!(result.is_ok(), "explicit DisabledForTests must construct");
+    }
+
+    /// DEBT-Fcipher-2 (AUDIT_2026-04-17): `emit_audit_event` builds an
+    /// `Event` with `duration_ms: 0` (always), no `correlation_id`, no
+    /// `tenant_id`, and empty `metadata`. Chronicle receives a useless
+    /// skeleton per operation. Fix: thread timing/context through the
+    /// event.
+    #[tokio::test]
+    async fn debt_fcipher_2_audit_event_must_carry_timing_and_context() {
+        let (engine, _reqs, events) = engine_with_recorders().await;
+        engine
+            .keyring_create(
+                "test",
+                KeyringAlgorithm::Aes256Gcm,
+                None,
+                None,
+                false,
+                Some("alice"),
+            )
+            .await
+            .unwrap();
+        let plaintext = STANDARD.encode(b"payload");
+        engine
+            .encrypt("test", &plaintext, None, None, false)
+            .await
+            .unwrap();
+
+        let evs = events.lock().unwrap();
+        assert!(
+            !evs.is_empty(),
+            "DEBT-Fcipher-2: no audit events emitted at all"
+        );
+        // At least one event must carry real timing.
+        assert!(
+            evs.iter().any(|e| e.duration_ms > 0),
+            "DEBT-Fcipher-2: every Event.duration_ms == 0. \
+             emit_audit_event doesn't measure operation latency."
+        );
+        // Actor-bearing operations must carry real metadata hinting at op.
+        let encrypts: Vec<_> = evs.iter().filter(|e| e.operation == "encrypt").collect();
+        assert!(!encrypts.is_empty(), "DEBT-Fcipher-2: no encrypt event");
+        for ev in encrypts {
+            assert!(
+                !ev.metadata.is_empty(),
+                "DEBT-Fcipher-2: encrypt audit metadata empty (no key_version, algorithm, etc.)"
+            );
+        }
+    }
+
+    /// DEBT-Fcipher-3 (AUDIT_2026-04-17): data-plane methods (`encrypt`,
+    /// `decrypt`, `sign`, `rewrap`, `generate_data_key`,
+    /// `verify_signature`) never invoke `self.check_policy(...)` — only
+    /// the in-keyring `KeyringPolicy` allowlist. The Sentry capability
+    /// is populated but never consulted on the hot path. Fix: call
+    /// `check_policy` on every data-plane op with a real actor.
+    #[tokio::test]
+    async fn debt_fcipher_3_data_plane_must_call_sentry() {
+        let (engine, reqs, _events) = engine_with_recorders().await;
+        engine
+            .keyring_create(
+                "test",
+                KeyringAlgorithm::Aes256Gcm,
+                None,
+                None,
+                false,
+                Some("alice"),
+            )
+            .await
+            .unwrap();
+        let plaintext = STANDARD.encode(b"payload");
+        let enc = engine
+            .encrypt("test", &plaintext, None, None, false)
+            .await
+            .unwrap();
+        let _ = engine.decrypt("test", &enc.ciphertext, None).await.unwrap();
+
+        let requests = reqs.lock().unwrap();
+        let encrypt_reqs: Vec<_> = requests.iter().filter(|r| r.action == "encrypt").collect();
+        let decrypt_reqs: Vec<_> = requests.iter().filter(|r| r.action == "decrypt").collect();
+        assert!(
+            !encrypt_reqs.is_empty(),
+            "DEBT-Fcipher-3: engine.encrypt() never invoked PolicyEvaluator. \
+             Sentry capability is never consulted on data plane."
+        );
+        assert!(
+            !decrypt_reqs.is_empty(),
+            "DEBT-Fcipher-3: engine.decrypt() never invoked PolicyEvaluator. \
+             Sentry capability is never consulted on data plane."
+        );
+    }
+
+    /// DEBT-Fcipher-4 (AUDIT_2026-04-17): `check_policy` builds
+    /// `PolicyPrincipal { id: actor.unwrap_or("").to_string(), roles:
+    /// vec![], claims: Default::default() }`. When actor is None,
+    /// Sentry is evaluating authorization for an empty-string principal
+    /// with no roles and no claims — every policy evaluates the same
+    /// because the principal identifies nobody. Fix: refuse to evaluate
+    /// policy with empty principal on security-sensitive ops.
+    #[tokio::test]
+    async fn debt_fcipher_4_policy_principal_must_not_be_empty() {
+        let (engine, reqs, _events) = engine_with_recorders().await;
+        // keyring_create hits check_policy. Pass actor=None to reproduce.
+        engine
+            .keyring_create("test", KeyringAlgorithm::Aes256Gcm, None, None, false, None)
+            .await
+            .unwrap();
+
+        let requests = reqs.lock().unwrap();
+        assert!(
+            !requests.is_empty(),
+            "DEBT-Fcipher-4: no policy requests emitted"
+        );
+        for req in requests.iter() {
+            assert!(
+                !req.principal.id.is_empty(),
+                "DEBT-Fcipher-4: PolicyRequest.principal.id is empty string. \
+                 Anonymous callers evaluate policy as 'nobody'. \
+                 Fix: fail-closed on missing actor, or require actor at API boundary."
+            );
+        }
+    }
+
+    /// DEBT-Fcipher-5 (AUDIT_2026-04-17): audit events for
+    /// `encrypt`/`decrypt`/`sign` pass `""` as the actor regardless of
+    /// who actually invoked them (engine.rs:313, :351, :507). Audit log
+    /// for data-plane ops attributes to nobody. Fix: thread actor
+    /// through `encrypt`/`decrypt`/`sign` and use `actor.unwrap_or(...)`
+    /// of a sentinel that is NOT empty.
+    #[tokio::test]
+    async fn debt_fcipher_5_audit_actor_must_not_be_empty_for_data_plane() {
+        let (engine, _reqs, events) = engine_with_recorders().await;
+        engine
+            .keyring_create(
+                "test",
+                KeyringAlgorithm::Aes256Gcm,
+                None,
+                None,
+                false,
+                Some("alice"),
+            )
+            .await
+            .unwrap();
+        let plaintext = STANDARD.encode(b"payload");
+        engine
+            .encrypt("test", &plaintext, None, None, false)
+            .await
+            .unwrap();
+
+        let evs = events.lock().unwrap();
+        let data_events: Vec<_> = evs
+            .iter()
+            .filter(|e| matches!(e.operation.as_str(), "encrypt" | "decrypt" | "sign"))
+            .collect();
+        assert!(
+            !data_events.is_empty(),
+            "DEBT-Fcipher-5: no encrypt/decrypt/sign audit events emitted"
+        );
+        for ev in data_events {
+            assert!(
+                !ev.actor.is_empty(),
+                "DEBT-Fcipher-5: {} event actor is empty string. \
+                 Data-plane ops are not attributable. \
+                 Fix: thread actor through encrypt/decrypt/sign.",
+                ev.operation
+            );
+        }
+    }
+
+    /// DEBT-Fcipher-6 (AUDIT_2026-04-17): `emit_audit_event` only
+    /// records success. When `decrypt` fails with a wrong AAD, the
+    /// `let _ = self.emit_audit_event("decrypt", ...)` line (engine.rs
+    /// :351) is never reached — the error short-circuits. Chronicle
+    /// never sees failed decrypt attempts. Fix: record `EventResult::
+    /// Error` on all failure paths (wrong context, wrong key, corrupt
+    /// ciphertext, policy deny).
+    #[tokio::test]
+    async fn debt_fcipher_6_failure_decrypt_must_emit_error_audit() {
+        let (engine, _reqs, events) = engine_with_recorders().await;
+        engine
+            .keyring_create(
+                "test",
+                KeyringAlgorithm::Aes256Gcm,
+                None,
+                None,
+                false,
+                Some("alice"),
+            )
+            .await
+            .unwrap();
+        let plaintext = STANDARD.encode(b"payload");
+        let enc = engine
+            .encrypt("test", &plaintext, Some("right-ctx"), None, false)
+            .await
+            .unwrap();
+        // Wrong context — should fail AEAD and audit as Error.
+        let _ = engine
+            .decrypt("test", &enc.ciphertext, Some("wrong-ctx"))
+            .await;
+
+        let evs = events.lock().unwrap();
+        let decrypt_failures: Vec<_> = evs
+            .iter()
+            .filter(|e| {
+                e.operation == "decrypt"
+                    && matches!(e.result, shroudb_chronicle_core::event::EventResult::Error)
+            })
+            .collect();
+        assert!(
+            !decrypt_failures.is_empty(),
+            "DEBT-Fcipher-6: failed decrypt (wrong AAD) did NOT emit an \
+             EventResult::Error audit event. Attackers can probe for \
+             valid ciphertexts without leaving a trail."
+        );
     }
 
     #[tokio::test]

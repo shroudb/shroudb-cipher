@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 use shroudb_acl::ServerAuthConfig;
+use shroudb_engine_bootstrap::{AuditConfig, PolicyConfig};
 
 #[derive(Debug, Deserialize, Default)]
 pub struct CipherServerConfig {
@@ -17,6 +18,13 @@ pub struct CipherServerConfig {
     pub auth: ServerAuthConfig,
     #[serde(default)]
     pub keyrings: HashMap<String, KeyringConfig>,
+    /// Audit (Chronicle) capability slot. Absent = fail-closed at
+    /// startup; operators must explicitly pick a mode.
+    #[serde(default)]
+    pub audit: Option<AuditConfig>,
+    /// Policy (Sentry) capability slot. Same contract as `audit`.
+    #[serde(default)]
+    pub policy: Option<PolicyConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -153,6 +161,67 @@ uri = "shroudb://token@127.0.0.1:6399"
             cfg.store.uri.as_deref(),
             Some("shroudb://token@127.0.0.1:6399")
         );
+    }
+
+    /// Former DEBT-Fcipher-7 (AUDIT_2026-04-17), now closed: the server
+    /// config carries `[audit]` and `[policy]` sections dispatched via
+    /// `shroudb-engine-bootstrap`. Running `shroudb-cipher` standalone
+    /// requires an explicit audit+policy choice at startup (no silent
+    /// `None` hardcode remains in `main.rs`).
+    #[test]
+    fn cipher_server_config_wires_audit_and_policy_sections() {
+        let toml = r#"
+[audit]
+mode = "remote"
+addr = "127.0.0.1:6899"
+auth_token = "test"
+
+[policy]
+mode = "remote"
+addr = "127.0.0.1:6499"
+auth_token = "test"
+"#;
+        let cfg: CipherServerConfig = toml::from_str(toml).expect("config parse");
+        let audit = cfg.audit.expect("[audit] must deserialize");
+        assert_eq!(audit.mode, "remote");
+        assert_eq!(audit.addr.as_deref(), Some("127.0.0.1:6899"));
+        let policy = cfg.policy.expect("[policy] must deserialize");
+        assert_eq!(policy.mode, "remote");
+        assert_eq!(policy.addr.as_deref(), Some("127.0.0.1:6499"));
+    }
+
+    #[test]
+    fn cipher_server_config_accepts_embedded_audit_and_policy() {
+        let toml = r#"
+[audit]
+mode = "embedded"
+
+[policy]
+mode = "embedded"
+"#;
+        let cfg: CipherServerConfig = toml::from_str(toml).expect("config parse");
+        assert_eq!(cfg.audit.unwrap().mode, "embedded");
+        assert_eq!(cfg.policy.unwrap().mode, "embedded");
+    }
+
+    #[test]
+    fn cipher_server_config_accepts_disabled_with_justification() {
+        let toml = r#"
+[audit]
+mode = "disabled"
+justification = "air-gapped deployment"
+
+[policy]
+mode = "disabled"
+justification = "ABAC enforced upstream at LB layer"
+"#;
+        let cfg: CipherServerConfig = toml::from_str(toml).expect("config parse");
+        let audit = cfg.audit.unwrap();
+        assert_eq!(audit.mode, "disabled");
+        assert!(audit.justification.unwrap().contains("air-gapped"));
+        let policy = cfg.policy.unwrap();
+        assert_eq!(policy.mode, "disabled");
+        assert!(policy.justification.unwrap().contains("ABAC"));
     }
 
     #[test]
