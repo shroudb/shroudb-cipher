@@ -17,7 +17,7 @@ Rules:
 
 ### Open
 
-- [ ] **DEBT-F-cipher-1** — `CipherEngine::new` must reject missing Sentry/Chronicle in strict mode. Test: `debt_fcipher_1_engine_new_must_reject_missing_capabilities` @ `shroudb-cipher-engine/src/engine.rs`.
+- [x] **DEBT-F-cipher-1** — `CipherEngine::new` must reject missing Sentry/Chronicle in strict mode. Test: `cipher_engine_new_requires_explicit_capability_variants` @ `shroudb-cipher-engine/src/engine.rs`.
 - [ ] **DEBT-F-cipher-2** — audit events must carry duration, correlation_id, tenant_id, and real metadata (not Default::default()). Test: `debt_fcipher_2_audit_event_must_carry_timing_and_context` @ same file.
 - [ ] **DEBT-F-cipher-3** — data-plane ops must call `check_policy`. Test: `debt_fcipher_3_data_plane_must_call_sentry` @ same file.
 - [ ] **DEBT-F-cipher-4** — `PolicyPrincipal.id` must not be empty (`actor.unwrap_or("")`). Test: `debt_fcipher_4_policy_principal_must_not_be_empty` @ same file.
