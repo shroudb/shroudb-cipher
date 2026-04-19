@@ -240,7 +240,11 @@ mode = "embedded"
         assert_eq!(audit.mode, "embedded");
         assert_eq!(policy.mode, "disabled");
         assert!(
-            policy.justification.as_deref().unwrap_or("").contains("no [policy] section"),
+            policy
+                .justification
+                .as_deref()
+                .unwrap_or("")
+                .contains("no [policy] section"),
             "default PolicyConfig must carry a non-empty auto-justification"
         );
     }
