@@ -24,9 +24,11 @@ pub struct CipherServerConfig {
     /// `[audit] mode = "disabled" justification = "..."`.
     #[serde(default)]
     pub audit: Option<AuditConfig>,
-    /// Policy (Sentry) capability slot. Absent = defaults to embedded
-    /// (engine-bootstrap default) — an in-process Sentry on the shared
-    /// storage. Same explicit-disable contract as `audit`.
+    /// Policy (Sentry) capability slot. Absent = defaults to
+    /// disabled-with-auto-justification (engine-bootstrap default):
+    /// an empty embedded Sentry would deny every request, so policy
+    /// stays permissive out of the box. Operators opt in to
+    /// enforcement via `[policy] mode = "embedded"` (or `"remote"`).
     #[serde(default)]
     pub policy: Option<PolicyConfig>,
 }
@@ -211,10 +213,13 @@ mode = "embedded"
     /// When `[audit]` and `[policy]` are omitted, the server falls
     /// through to engine-bootstrap's embedded default. We verify this
     /// here at the config layer: the bare `Option<…>` is `None`, and
-    /// `unwrap_or_default()` (what `main.rs` does) yields a config with
-    /// `mode = "embedded"`.
+    /// `unwrap_or_default()` (what `main.rs` does) yields a config whose
+    /// mode follows the asymmetric engine-bootstrap defaults — `audit`
+    /// defaults embedded (an empty Chronicle store is functional),
+    /// `policy` defaults disabled-with-auto-justification (an empty
+    /// embedded Sentry would deny every request).
     #[test]
-    fn cipher_server_config_absent_audit_and_policy_default_to_embedded() {
+    fn cipher_server_config_absent_audit_and_policy_have_asymmetric_defaults() {
         let toml = r#"
 [store]
 mode = "embedded"
@@ -228,12 +233,16 @@ mode = "embedded"
             cfg.policy.is_none(),
             "omitted [policy] must deserialize as None"
         );
-        // The server collapses None into the engine-bootstrap default,
-        // which is mode = "embedded" per `AuditConfig`/`PolicyConfig`.
+        // AuditConfig::default() → embedded; PolicyConfig::default() →
+        // disabled with an auto-generated justification.
         let audit = cfg.audit.clone().unwrap_or_default();
         let policy = cfg.policy.clone().unwrap_or_default();
         assert_eq!(audit.mode, "embedded");
-        assert_eq!(policy.mode, "embedded");
+        assert_eq!(policy.mode, "disabled");
+        assert!(
+            policy.justification.as_deref().unwrap_or("").contains("no [policy] section"),
+            "default PolicyConfig must carry a non-empty auto-justification"
+        );
     }
 
     #[test]

@@ -73,9 +73,3 @@ uuid = { version = "1", features = ["v4"] }
 hex = "0.4"
 base64 = "0.22"
 dashmap = "6"
-
-# TEMPORARY: local verification patch for shroudb-engine-bootstrap 0.3.0.
-# Remove in the follow-up commit once the commons version is published
-# to the shroudb registry.
-[patch.shroudb]
-shroudb-engine-bootstrap = { path = "/Users/nlucas/dev/shroudb/commons/shroudb-engine-bootstrap" }
