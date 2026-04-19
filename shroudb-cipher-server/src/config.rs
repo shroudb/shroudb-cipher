@@ -18,11 +18,15 @@ pub struct CipherServerConfig {
     pub auth: ServerAuthConfig,
     #[serde(default)]
     pub keyrings: HashMap<String, KeyringConfig>,
-    /// Audit (Chronicle) capability slot. Absent = fail-closed at
-    /// startup; operators must explicitly pick a mode.
+    /// Audit (Chronicle) capability slot. Absent = defaults to embedded
+    /// (engine-bootstrap default) — an in-process Chronicle on the
+    /// shared storage. Operators opt out explicitly via
+    /// `[audit] mode = "disabled" justification = "..."`.
     #[serde(default)]
     pub audit: Option<AuditConfig>,
-    /// Policy (Sentry) capability slot. Same contract as `audit`.
+    /// Policy (Sentry) capability slot. Absent = defaults to embedded
+    /// (engine-bootstrap default) — an in-process Sentry on the shared
+    /// storage. Same explicit-disable contract as `audit`.
     #[serde(default)]
     pub policy: Option<PolicyConfig>,
 }
@@ -202,6 +206,34 @@ mode = "embedded"
         let cfg: CipherServerConfig = toml::from_str(toml).expect("config parse");
         assert_eq!(cfg.audit.unwrap().mode, "embedded");
         assert_eq!(cfg.policy.unwrap().mode, "embedded");
+    }
+
+    /// When `[audit]` and `[policy]` are omitted, the server falls
+    /// through to engine-bootstrap's embedded default. We verify this
+    /// here at the config layer: the bare `Option<…>` is `None`, and
+    /// `unwrap_or_default()` (what `main.rs` does) yields a config with
+    /// `mode = "embedded"`.
+    #[test]
+    fn cipher_server_config_absent_audit_and_policy_default_to_embedded() {
+        let toml = r#"
+[store]
+mode = "embedded"
+"#;
+        let cfg: CipherServerConfig = toml::from_str(toml).expect("config parse");
+        assert!(
+            cfg.audit.is_none(),
+            "omitted [audit] must deserialize as None"
+        );
+        assert!(
+            cfg.policy.is_none(),
+            "omitted [policy] must deserialize as None"
+        );
+        // The server collapses None into the engine-bootstrap default,
+        // which is mode = "embedded" per `AuditConfig`/`PolicyConfig`.
+        let audit = cfg.audit.clone().unwrap_or_default();
+        let policy = cfg.policy.clone().unwrap_or_default();
+        assert_eq!(audit.mode, "embedded");
+        assert_eq!(policy.mode, "embedded");
     }
 
     #[test]

@@ -100,28 +100,17 @@ async fn run_server<S: Store + 'static>(
     store: Arc<S>,
     storage: Option<Arc<shroudb_storage::StorageEngine>>,
 ) -> anyhow::Result<()> {
-    // Resolve audit + policy capabilities from config — no silent None.
-    let audit_cfg = cfg.audit.clone().ok_or_else(|| {
-        anyhow::anyhow!(
-            "missing [audit] config section. Pick one:\n  \
-             [audit] mode = \"remote\" addr = \"chronicle.internal:7300\"\n  \
-             [audit] mode = \"embedded\"\n  \
-             [audit] mode = \"disabled\" justification = \"<reason>\""
-        )
-    })?;
+    // Resolve audit + policy capabilities from config. Omitted sections
+    // fall through to engine-bootstrap's embedded defaults — explicit
+    // `mode = "disabled"` with a justification is still the way to
+    // opt out.
+    let audit_cfg = cfg.audit.clone().unwrap_or_default();
     let audit_cap = audit_cfg
         .resolve(storage.clone())
         .await
         .context("failed to resolve [audit] capability")?;
 
-    let policy_cfg = cfg.policy.clone().ok_or_else(|| {
-        anyhow::anyhow!(
-            "missing [policy] config section. Pick one:\n  \
-             [policy] mode = \"remote\" addr = \"sentry.internal:7100\"\n  \
-             [policy] mode = \"embedded\"\n  \
-             [policy] mode = \"disabled\" justification = \"<reason>\""
-        )
-    })?;
+    let policy_cfg = cfg.policy.clone().unwrap_or_default();
     let policy_cap = policy_cfg
         .resolve(storage.clone(), audit_cap.as_ref().cloned())
         .await
