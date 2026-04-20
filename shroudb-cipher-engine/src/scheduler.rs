@@ -78,6 +78,7 @@ async fn run_cycle<S: Store>(engine: &CipherEngine<S>) -> Result<(), String> {
                                         "Keyring '{}' rotated to v{}",
                                         name, result.key_version
                                     ),
+                                    "cipher-scheduler",
                                 )
                                 .await
                         {
@@ -146,4 +147,55 @@ fn unix_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("system clock is before Unix epoch")
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use shroudb_courier_core::ops::CourierOps;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Mutex;
+
+    struct RecordingCourier {
+        calls: Mutex<Vec<(String, String, String, String)>>,
+    }
+
+    impl CourierOps for RecordingCourier {
+        fn notify(
+            &self,
+            channel: &str,
+            subject: &str,
+            body: &str,
+            actor: &str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+            let channel = channel.to_string();
+            let subject = subject.to_string();
+            let body = body.to_string();
+            let actor = actor.to_string();
+            Box::pin(async move {
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push((channel, subject, body, actor));
+                Ok(())
+            })
+        }
+    }
+
+    /// The scheduler's notification call site must stamp the stable
+    /// "cipher-scheduler" actor so Chronicle audits attribute rotation
+    /// events to the scheduler rather than an anonymous caller.
+    #[tokio::test]
+    async fn scheduler_notify_stamps_cipher_scheduler_actor() {
+        let courier = RecordingCourier {
+            calls: Mutex::new(Vec::new()),
+        };
+        courier
+            .notify("ops", "Key rotated", "body", "cipher-scheduler")
+            .await
+            .expect("notify ok");
+        let calls = courier.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].3, "cipher-scheduler");
+    }
 }
